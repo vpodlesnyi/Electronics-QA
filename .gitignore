@@ -1,0 +1,7 @@
+# Keep folder structure but ignore generated report files
+OUTPUT/BOM/*
+!OUTPUT/BOM/.gitkeep
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
