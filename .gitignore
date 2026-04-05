@@ -1,4 +1,7 @@
-# Keep folder structure but ignore generated report files
+# Keep folder structure but ignore all files inside INPUT/BOM and OUTPUT/BOM
+INPUT/BOM/*
+!INPUT/BOM/.gitkeep
+
 OUTPUT/BOM/*
 !OUTPUT/BOM/.gitkeep
 
