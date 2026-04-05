@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "pcbparts"
+  ],
+  "enableAllProjectMcpServers": true
+}

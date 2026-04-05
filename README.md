@@ -31,8 +31,10 @@ You do not need to write any code to use it.
 ## Requirements
 
 - [Node.js](https://nodejs.org/) (v18 or later)
-- An [Anthropic API key](https://console.anthropic.com/) (Claude Code uses it to run AI analysis)
+- A [Claude subscription](https://claude.ai) (Pro or above — used to log in to Claude Code)
 - A terminal (macOS Terminal, Windows PowerShell, Linux shell)
+
+> **Note:** Claude Code can be authenticated with your Claude subscription — no API key needed. Avoid setting up an API key unless you have a specific reason; the subscription login is simpler and recommended for most users.
 
 ---
 
@@ -45,11 +47,11 @@ You do not need to write any code to use it.
 npm install -g @anthropic-ai/claude-code
 ```
 
-**Step 2 — Set your API key:**
+**Step 2 — Log in with your Claude subscription:**
 ```bash
-export ANTHROPIC_API_KEY=your-key-here
+claude login
 ```
-To avoid doing this every session, add the line above to your `~/.bashrc` or `~/.zshrc` file.
+This opens a browser window. Sign in with your claude.ai account and authorize Claude Code.
 
 **Step 3 — Clone this repo and start Claude Code:**
 ```bash
@@ -57,6 +59,14 @@ git clone <your-repo-url>
 cd <your-repo>
 claude
 ```
+
+**Step 4 — Verify the model:**
+
+Inside Claude Code, run:
+```
+/model
+```
+It should show `claude-sonnet-*`. Sonnet is the recommended model for this project — it handles multi-step lookups and conflict detection reliably.
 
 ---
 
@@ -75,17 +85,11 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 npm install -g @anthropic-ai/claude-code
 ```
 
-**Step 4 — Set your API key:**
-
-For the current session only:
+**Step 4 — Log in with your Claude subscription:**
 ```powershell
-$env:ANTHROPIC_API_KEY="your-key-here"
+claude login
 ```
-
-To set it permanently (recommended — run once, then restart PowerShell):
-```powershell
-[System.Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "your-key-here", "User")
-```
+This opens a browser window. Sign in with your claude.ai account and authorize Claude Code.
 
 **Step 5 — Clone this repo and start Claude Code:**
 ```powershell
@@ -93,6 +97,14 @@ git clone <your-repo-url>
 cd <your-repo>
 claude
 ```
+
+**Step 6 — Verify the model:**
+
+Inside Claude Code, run:
+```
+/model
+```
+It should show `claude-sonnet-*`. Sonnet is the recommended model for this project — it handles multi-step lookups and conflict detection reliably.
 
 That's it. The skills and MCP plugin are loaded automatically — no extra configuration needed.
 
