@@ -14,7 +14,7 @@ The goal is not to replace engineering judgment, but to help engineers identify 
 
 | Module | Status |
 |---|---|
-| BOM QA | ✅ Available |
+| BOM QA | 🔧 In development |
 | CLI (`eqa`) | 🔧 In development |
 | Schematic review | 📋 Planned |
 
