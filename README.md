@@ -14,7 +14,7 @@ The goal is not to replace engineering judgment, but to help engineers identify 
 
 | Module | Status |
 |---|---|
-| BOM QA | 🔧 In development |
+| BOM QA | ✅ Available |
 | CLI (`eqa`) | 🔧 In development |
 | Schematic review | 📋 Planned |
 
@@ -38,6 +38,8 @@ You do not need to write any code to use it.
 
 ## Setup (first time only)
 
+### macOS / Linux
+
 **Step 1 — Install Claude Code:**
 ```bash
 npm install -g @anthropic-ai/claude-code
@@ -49,14 +51,46 @@ export ANTHROPIC_API_KEY=your-key-here
 ```
 To avoid doing this every session, add the line above to your `~/.bashrc` or `~/.zshrc` file.
 
-**Step 3 — Clone this repo:**
+**Step 3 — Clone this repo and start Claude Code:**
 ```bash
 git clone <your-repo-url>
 cd <your-repo>
+claude
 ```
 
-**Step 4 — Start Claude Code inside the repo folder:**
-```bash
+---
+
+### Windows (PowerShell)
+
+**Step 1 — Install [Node.js](https://nodejs.org/) and [Git](https://git-scm.com/download/win)** using the standard Windows installers.
+
+**Step 2 — Allow PowerShell to run scripts** (required once, safe to do):
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+> By default, Windows blocks PowerShell scripts. This one-time command allows Node.js tools like `npm` to run normally. Type `Y` when prompted.
+
+**Step 3 — Install Claude Code:**
+```powershell
+npm install -g @anthropic-ai/claude-code
+```
+
+**Step 4 — Set your API key:**
+
+For the current session only:
+```powershell
+$env:ANTHROPIC_API_KEY="your-key-here"
+```
+
+To set it permanently (recommended — run once, then restart PowerShell):
+```powershell
+[System.Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "your-key-here", "User")
+```
+
+**Step 5 — Clone this repo and start Claude Code:**
+```powershell
+git clone <your-repo-url>
+cd <your-repo>
 claude
 ```
 
@@ -154,6 +188,6 @@ This is what powers the live component lookups in the BOM QA module.
 
 ## Notes
 
-- Files in `OUTPUT/BOM/` and `INPUT/BOM/` are git-ignored — only the folder structure is tracked in git
+- Reports in `OUTPUT/BOM/` are git-ignored — only the folder structure is tracked in git
 - The BOM QA skill does **not** suggest replacement parts — that is out of scope and will be a separate module
 - Data lookups are live (DigiKey, Mouser, LCSC APIs + manufacturer websites) — stock numbers reflect the moment the check was run
