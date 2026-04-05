@@ -154,6 +154,6 @@ This is what powers the live component lookups in the BOM QA module.
 
 ## Notes
 
-- Reports in `OUTPUT/BOM/` are git-ignored — only the folder structure is tracked in git
+- Files in `OUTPUT/BOM/` and `INPUT/BOM/` are git-ignored — only the folder structure is tracked in git
 - The BOM QA skill does **not** suggest replacement parts — that is out of scope and will be a separate module
 - Data lookups are live (DigiKey, Mouser, LCSC APIs + manufacturer websites) — stock numbers reflect the moment the check was run
