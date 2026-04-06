@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "pcbparts": {
-      "type": "sse",
+      "type": "http",
       "url": "https://pcbparts.dev/mcp"
     }
   }
