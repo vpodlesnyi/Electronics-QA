@@ -1,6 +1,17 @@
 {
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "Bash(python*)",
+      "Bash(pip install*)",
+      "Bash(mkdir*)",
+      "Bash(claude mcp*)",
+      "Write(OUTPUT/BOM/*)"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "pcbparts"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

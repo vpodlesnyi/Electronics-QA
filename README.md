@@ -31,6 +31,7 @@ You do not need to write any code to use it.
 ## Requirements
 
 - [Node.js](https://nodejs.org/) (v18 or later)
+- [Python](https://www.python.org/downloads/) (v3.8 or later) — used to read Excel BOM files and generate Excel reports
 - A [Claude subscription](https://claude.ai) (Pro or above — used to log in to Claude Code)
 - A terminal (macOS Terminal, Windows PowerShell, Linux shell)
 
@@ -113,6 +114,16 @@ That's it. The skills and MCP plugin are loaded automatically — no extra confi
 ## Module: BOM QA
 
 Validates a Bill of Materials against common production readiness criteria.
+
+### How it works
+
+When you trigger the skill, Claude runs a structured five-phase process:
+
+1. **Intake** — Reads your BOM file (Excel or CSV) and extracts every MPN, manufacturer, and reference designator. Asks you to confirm the compliance criteria to apply.
+2. **Permission setup** — Pre-approves all required tool permissions in one go at the start of the session, so there are no repeated approval prompts during research.
+3. **Component research** — For each unique MPN, queries the pcbparts MCP plugin (LCSC/JLCPCB, Mouser, DigiKey) in parallel, then cross-checks against the manufacturer's product page and datasheet PDF. Every data field (lifecycle, temperature range, RoHS) is collected from multiple independent sources.
+4. **Conflict detection** — Compares values across sources. If any two sources disagree on a field, the row is flagged 🔴 and the discrepancy is logged with the exact value each source reported.
+5. **Report generation** — Evaluates every part against your criteria and saves a timestamped report (Markdown or Excel) to `OUTPUT/BOM/`. The report includes a summary, a full component table with per-source data, a dedicated conflict section, and an action list for all failed or unverified parts.
 
 ### What it checks
 

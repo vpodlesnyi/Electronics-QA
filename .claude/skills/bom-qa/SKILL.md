@@ -23,6 +23,47 @@ components is out of scope for this skill — that will be handled by a separate
 
 ---
 
+## Phase 0 — Permission Setup
+
+Before doing any other work, ensure all tool permissions required for BOM QA are
+pre-approved in `.claude/settings.local.json`. This prevents repeated permission prompts
+during multi-part component research.
+
+**Step 1 — Read the current permissions:**
+
+```
+Read('.claude/settings.local.json')
+```
+
+**Step 2 — Identify any missing patterns from this required set:**
+
+| Permission pattern | Purpose |
+|---|---|
+| `"WebSearch"` | Search for component data, lifecycle status, datasheets |
+| `"WebFetch"` | Fetch manufacturer pages, datasheet PDFs, distributor pages (any domain) |
+| `"Bash(python*)"` | Read Excel BOM files and generate Excel reports via openpyxl |
+| `"Bash(pip install*)"` | Install openpyxl if not already present |
+| `"Write(OUTPUT/BOM/*)"` | Save report files to the output folder |
+| `"Bash(mkdir*)"` | Create output directories if they don't exist |
+
+> **Note on pcbparts MCP tools:** These are already auto-approved via
+> `"enableAllProjectMcpServers": true` in `settings.local.json`. No additional
+> entry is needed for `mcp__pcbparts__*` tools.
+
+**Step 3 — Add missing patterns in a single Edit:**
+
+Use the Edit tool to insert any missing entries into the `permissions.allow` array.
+Make the smallest possible change — do not remove or reorder existing entries.
+
+Example: if only `"WebFetch"` and `"Write(OUTPUT/BOM/*)"` are missing, add only those two.
+
+**Step 4 — Confirm and proceed:**
+
+Tell the user which permissions were already present and which (if any) were just added,
+then continue to Phase 1 without pausing for further approval.
+
+---
+
 ## Phase 1 — Intake
 
 ### 1.1 Locate the BOM file
@@ -39,7 +80,21 @@ List the files in that folder and pick the one to process:
 - If multiple files are present, list them and ask the user which one to process
 - Supported formats: `.xlsx`, `.xls`, `.csv`, `.tsv`, and plain text tables
 
-Read the file using the appropriate tool (`Read` for CSV/text, `xlsx` skill for Excel).
+Read the file using the appropriate tool:
+- **CSV/TSV/plain text** → use the `Read` tool directly
+- **Excel (`.xlsx` / `.xls`)** → use the `Bash` tool to run Python with `openpyxl`:
+
+```python
+import openpyxl
+wb = openpyxl.load_workbook('INPUT/BOM/<filename>')
+ws = wb.active
+for row in ws.iter_rows(values_only=True):
+    print(row)
+```
+
+Print all rows (not just a preview) so every MPN is captured. If `openpyxl` is not installed,
+run `pip install openpyxl` first, then retry. Do **not** use `pandas` — it is not always available.
+
 Look for columns containing:
 - **MPN** (Manufacturer Part Number) — primary key for all lookups
 - **Manufacturer** — helps disambiguate MPNs that exist across multiple vendors
@@ -74,6 +129,8 @@ Use these tools simultaneously for each part:
 
 1. **`jlc_get_part(mpn=MPN)`** — Searches LCSC/JLCPCB database by MPN. Returns: LCSC part
    code, stock, price, package, specs, datasheet URL, EasyEDA footprint status.
+   Optionally follow up with **`jlc_stock_check(mpn=MPN)`** if you need a real-time stock
+   confirmation (jlc_get_part data can lag slightly).
 
 2. **`mouser_get_part(part_number=MPN)`** — Full Mouser lookup. Returns: detailed attributes
    including lifecycle status, RoHS, temperature range, stock, pricing tiers, datasheet link.
@@ -82,11 +139,15 @@ Use these tools simultaneously for each part:
 3. **`digikey_get_part(product_number=MPN)`** — DigiKey lookup. Returns: comprehensive
    parameters, availability, pricing, datasheet URL, lifecycle/status info.
 
+4. **`cse_search(query=MPN)`** — ComponentSearchEngine lookup. Returns: additional datasheet
+   URLs, package/footprint confirmation, and specs from a separate aggregator. Useful as a
+   fourth data point when the three distributor APIs conflict or return incomplete data.
+
 > **API priority for data fields:**
 > - Lifecycle status: Mouser > DigiKey > manufacturer website
 > - RoHS: Mouser > DigiKey > datasheet
 > - Temperature range: Mouser attributes > DigiKey parameters > datasheet
-> - Stock quantity: compare across all three distributors, use the highest single-distributor value
+> - Stock quantity: compare across all three distributors (Mouser, DigiKey, LCSC), use the highest single-distributor value
 
 ### 2.2 Manufacturer Website, Datasheet PDF & Triple Verification
 
@@ -145,7 +206,7 @@ For each field that has multiple source values, record all of them before settli
 | RoHS — Source Breakdown | e.g. "Mouser: Yes · Datasheet: RoHS 3 compliant" |
 | Stock — Mouser | pcs |
 | Stock — DigiKey | pcs |
-| Stock — LCSC | pcs |
+| Stock — LCSC | pcs (confirmed via jlc_stock_check if real-time accuracy needed) |
 | 🔴 Source Conflicts | List every field where sources disagreed and what each said |
 | Datasheet URL | Link to the PDF that was scanned |
 | Notes | Any other caveats or observations |
@@ -204,7 +265,9 @@ OUTPUT/BOM/<input-filename>_report_<YYYY-MM-DD>.xlsx  (if user requests Excel)
 Ask the user which format they'd like:
 
 - **A) Markdown (default)** — clean `.md` file, readable in any editor or on GitHub
-- **B) Excel file (.xlsx)** — color-coded table. Use the `xlsx` skill to generate it.
+- **B) Excel file (.xlsx)** — color-coded table. Use the `Bash` tool to generate it with `openpyxl`
+  (install with `pip install openpyxl` if needed). Apply fill colors: green for PASS rows,
+  red for FAIL rows, orange for conflict rows.
 - **C) Confluence wiki markup** — saved as `.txt`, ready to paste into Confluence
 - **D) Plain text** — concise `.txt` summary, good for quick review in terminal
 
@@ -248,6 +311,10 @@ Note to user that failing/warned components should be reviewed for replacement s
   note all candidates
 - **Batch efficiency**: Use Mouser's pipe-delimited batch lookup (`"MPN1|MPN2|..."`) to look up
   up to 10 parts at once — this saves significant time on large BOMs
+- **Real-time JLCPCB stock**: `jlc_get_part` can lag; use `jlc_stock_check` when a part is
+  borderline on minimum quantity and you need the freshest count
+- **CSE as tiebreaker**: When Mouser and DigiKey conflict on a spec, run `cse_search` as a
+  third-party check before escalating to a full datasheet scan
 - **Large BOMs (>20 parts)**: Process in batches and give the user a progress update between
   batches so they know the work is ongoing
 - **Datasheet URLs**: Always include them — they let the engineer verify your findings directly
