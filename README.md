@@ -207,6 +207,41 @@ The pcbparts plugin gives Claude access to:
 
 This is what powers the live component lookups in the BOM QA module.
 
+### Setting up on a new machine
+
+To make pcbparts available globally (across all projects, without approval prompts), run this once per machine:
+
+**Step 1 — Register the MCP server at user level:**
+```bash
+claude mcp add -s user --transport http pcbparts https://pcbparts.dev/mcp
+```
+
+**Step 2 — Create `~/.claude/settings.json`** with the following content to auto-allow all pcbparts tools:
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__pcbparts__jlc_search",
+      "mcp__pcbparts__jlc_search_help",
+      "mcp__pcbparts__jlc_stock_check",
+      "mcp__pcbparts__jlc_get_part",
+      "mcp__pcbparts__jlc_find_alternatives",
+      "mcp__pcbparts__jlc_get_pinout",
+      "mcp__pcbparts__mouser_get_part",
+      "mcp__pcbparts__digikey_get_part",
+      "mcp__pcbparts__cse_search",
+      "mcp__pcbparts__cse_get_kicad",
+      "mcp__pcbparts__sensor_recommend",
+      "mcp__pcbparts__board_search",
+      "mcp__pcbparts__board_get",
+      "mcp__pcbparts__get_design_rules"
+    ]
+  }
+}
+```
+
+After these two steps, Claude Code will connect to pcbparts automatically on startup and call its tools without asking for permission each time.
+
 ---
 
 ## Notes

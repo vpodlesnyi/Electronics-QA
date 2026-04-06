@@ -23,19 +23,69 @@ components is out of scope for this skill — that will be handled by a separate
 
 ---
 
-## Phase 0 — Permission Setup
+## Phase 0 — Machine Setup
 
-Before doing any other work, ensure all tool permissions required for BOM QA are
-pre-approved in `.claude/settings.local.json`. This prevents repeated permission prompts
-during multi-part component research.
+Before anything else, verify that pcbparts is registered at the user level and that
+its tools are auto-approved. This is a one-time setup per machine — skip silently if
+already done.
 
-**Step 1 — Read the current permissions:**
+**Step 1 — Check MCP server registration**
 
+Read `~/.claude.json` (Windows: `C:/Users/<username>/.claude.json`, detected via `$HOME`
+or `$USERPROFILE`). Look for a `mcpServers.pcbparts` entry. If it is missing, add it:
+
+```json
+"pcbparts": {
+  "type": "http",
+  "url": "https://pcbparts.dev/mcp"
+}
 ```
-Read('.claude/settings.local.json')
+
+Use `Edit` to insert it into the `mcpServers` object. If `mcpServers` does not exist,
+add the whole object. Make the minimal change — do not touch other keys.
+
+**Step 2 — Check user-level permissions**
+
+Read `~/.claude/settings.json`. If the file does not exist, create it. Ensure the
+following entries are present in `permissions.allow`:
+
+```json
+[
+  "mcp__pcbparts__jlc_search",
+  "mcp__pcbparts__jlc_search_help",
+  "mcp__pcbparts__jlc_stock_check",
+  "mcp__pcbparts__jlc_get_part",
+  "mcp__pcbparts__jlc_find_alternatives",
+  "mcp__pcbparts__jlc_get_pinout",
+  "mcp__pcbparts__mouser_get_part",
+  "mcp__pcbparts__digikey_get_part",
+  "mcp__pcbparts__cse_search",
+  "mcp__pcbparts__cse_get_kicad",
+  "mcp__pcbparts__sensor_recommend",
+  "mcp__pcbparts__board_search",
+  "mcp__pcbparts__board_get",
+  "mcp__pcbparts__get_design_rules"
+]
 ```
 
-**Step 2 — Identify any missing patterns from this required set:**
+Add only the entries that are missing. Do not remove or reorder existing entries.
+
+**Step 3 — Report and continue**
+
+If any changes were made, tell the user:
+> "pcbparts was not configured on this machine — set it up automatically. No action needed."
+
+If everything was already in place, say nothing and proceed.
+
+---
+
+## Phase 1 — Permission Setup
+
+Ensure all tool permissions required for BOM QA are pre-approved in
+`.claude/settings.local.json`. Do this **once per project** — if all permissions are
+already present, skip this phase silently without any output.
+
+**Required permissions:**
 
 | Permission pattern | Purpose |
 |---|---|
@@ -46,27 +96,23 @@ Read('.claude/settings.local.json')
 | `"Write(OUTPUT/BOM/*)"` | Save report files to the output folder |
 | `"Bash(mkdir*)"` | Create output directories if they don't exist |
 
-> **Note on pcbparts MCP tools:** These are already auto-approved via
-> `"enableAllProjectMcpServers": true` in `settings.local.json`. No additional
-> entry is needed for `mcp__pcbparts__*` tools.
+> **Note on pcbparts MCP tools:** Already auto-approved via `"enableAllProjectMcpServers": true`
+> in `settings.local.json`. No additional entry needed for `mcp__pcbparts__*` tools.
 
-**Step 3 — Add missing patterns in a single Edit:**
+**Steps:**
 
-Use the Edit tool to insert any missing entries into the `permissions.allow` array.
-Make the smallest possible change — do not remove or reorder existing entries.
-
-Example: if only `"WebFetch"` and `"Write(OUTPUT/BOM/*)"` are missing, add only those two.
-
-**Step 4 — Confirm and proceed:**
-
-Tell the user which permissions were already present and which (if any) were just added,
-then continue to Phase 1 without pausing for further approval.
+1. Read `.claude/settings.local.json`.
+2. Compare the existing `permissions.allow` array against the required set above.
+3. **If all are present:** proceed immediately — no output, no message to user.
+4. **If any are missing:** add only the missing entries in a single Edit (minimum change —
+   do not remove or reorder existing entries), then tell the user only what was added.
+   Do not list permissions that were already present.
 
 ---
 
-## Phase 1 — Intake
+## Phase 2 — Intake
 
-### 1.1 Locate the BOM file
+### 2.1 Locate the BOM file
 
 **Do not ask the user to provide or attach a file.** BOM files are always read from the
 fixed input path relative to the project root:
@@ -102,7 +148,7 @@ Look for columns containing:
 
 If column names are ambiguous, make your best guess and confirm with the user before proceeding.
 
-### 1.2 Collect Compliance Criteria
+### 2.2 Collect Compliance Criteria
 
 Before starting research, ask the user which requirements apply:
 
@@ -119,7 +165,7 @@ Active lifecycle, RoHS compliant, –40 to +85°C, ≥ 500 pcs.
 
 ---
 
-## Phase 2 — Component Research
+## Phase 3 — Component Research
 
 Research **all components in parallel where possible** to save time. For each MPN:
 
@@ -227,7 +273,7 @@ what was found on each source so they know exactly where to look.
 
 ---
 
-## Phase 3 — Compliance Evaluation
+## Phase 4 — Compliance Evaluation
 
 For each component, compare the collected data against the user's criteria from Phase 1.
 
@@ -248,7 +294,7 @@ This level of detail is what distinguishes a trustworthy BOM audit from a superf
 
 ---
 
-## Phase 4 — Output
+## Phase 5 — Output
 
 **Reports are always saved to:**
 ```

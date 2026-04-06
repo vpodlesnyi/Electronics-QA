@@ -7,7 +7,8 @@
       "Bash(pip install*)",
       "Bash(mkdir*)",
       "Bash(claude mcp*)",
-      "Write(OUTPUT/BOM/*)"
+      "Write(OUTPUT/BOM/*)",
+      "mcp__pcbparts__jlc_search_help"
     ]
   },
   "enableAllProjectMcpServers": true,
