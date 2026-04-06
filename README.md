@@ -209,14 +209,12 @@ This is what powers the live component lookups in the BOM QA module.
 
 ### Setting up on a new machine
 
-To make pcbparts available globally (across all projects, without approval prompts), run this once per machine:
+**Server registration — no manual step needed.**
+The repo includes `.mcp.json` which defines the pcbparts server at the project level, and `.claude/settings.local.json` includes `"enableAllProjectMcpServers": true`. Together these cause Claude Code to load pcbparts automatically when you open the project — no `claude mcp add` command is required.
 
-**Step 1 — Register the MCP server at user level:**
-```bash
-claude mcp add -s user --transport http pcbparts https://pcbparts.dev/mcp
-```
+**Tool permissions — handled automatically on first run.**
+Each pcbparts tool call requires an entry in `permissions.allow` to run without an approval prompt. These are stored in your user-level `~/.claude/settings.json`, which is not part of this repo. On the first run of `/bom-qa` on a new machine, Phase 0 of the skill detects missing entries and adds them automatically. If you prefer to set this up manually before running the skill, create `~/.claude/settings.json` with:
 
-**Step 2 — Create `~/.claude/settings.json`** with the following content to auto-allow all pcbparts tools:
 ```json
 {
   "permissions": {
@@ -240,7 +238,18 @@ claude mcp add -s user --transport http pcbparts https://pcbparts.dev/mcp
 }
 ```
 
-After these two steps, Claude Code will connect to pcbparts automatically on startup and call its tools without asking for permission each time.
+If the file already exists, add only the missing entries — do not replace the whole file.
+
+**Summary of what each config layer does:**
+
+| File | Location | What it does |
+|---|---|---|
+| `.mcp.json` | repo root (tracked) | Defines the pcbparts HTTP server endpoint |
+| `.claude/settings.local.json` | repo (tracked) | Auto-enables the server; pre-approves `jlc_search_help` |
+| `~/.claude/settings.json` | user home (not in repo) | Pre-approves the remaining 13 pcbparts tools |
+| `~/.claude.json` | user home (not in repo) | Written by `claude mcp add`; **not needed here** |
+
+On a fresh machine, the only file that must exist before running the skill without any approval prompts is `~/.claude/settings.json` with the entries above. The skill will create it for you if it is missing.
 
 ---
 
