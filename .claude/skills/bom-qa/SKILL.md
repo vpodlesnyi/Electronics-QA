@@ -169,7 +169,49 @@ Active lifecycle, RoHS compliant, –40 to +85°C, ≥ 500 pcs.
 
 Research **all components in parallel where possible** to save time. For each MPN:
 
-### 2.1 API Lookups (run in parallel)
+### STEP 0 — Part Number Inference (MANDATORY — run BEFORE any API call)
+
+**This step is mandatory and must be completed before calling any API.**
+
+For passive components, decode the part number to extract known parameters from industry
+standards. These values are deterministic and do not require API confirmation — they follow
+the JEDEC EIA-198 standard.
+
+**MLCC dielectric temperature class (from part number suffix or description):**
+
+| Code | Temperature Range | Notes |
+|---|---|---|
+| C0G / NP0 | –55°C to +125°C | Most stable; used for precision circuits |
+| X5R | –55°C to +85°C | Good for decoupling |
+| X7R | –55°C to +125°C | General purpose |
+| X7S | –55°C to +125°C | Similar to X7R |
+| Y5V | –30°C to +85°C | Least stable; avoid for precision |
+| X8R | –55°C to +150°C | High temp |
+
+Record the inferred temperature as "Inferred from JEDEC [code] class" in the Temp Source field.
+This inferred value **must still be confirmed by at least one distributor attribute or datasheet** —
+but it gives you a strong prior to compare against.
+
+**Resistor series temperature ranges (standard per manufacturer series):**
+
+| Series | Manufacturer | Temp Range |
+|---|---|---|
+| CRCW series | Vishay | –55°C to +155°C |
+| RC / RV / RT series | Yageo | –55°C to +155°C |
+| CRMA series | Vishay | –55°C to +155°C |
+| ERJ series | Panasonic | –55°C to +155°C |
+| CR series | Samsung | –55°C to +155°C |
+
+**Diodes and TVS:**
+- Standard switching diodes (1N4148, SOD-123): –55°C to +150°C (Tj max)
+- TVS diodes: ambient operating typically –55°C to +150°C
+
+**If JEDEC class or series temperature is inferrable, record it immediately as a "pre-research" value.**
+This prevents the mistake of leaving temp as N/A after API lookups return incomplete descriptions.
+
+---
+
+### 3.1 API Lookups (run in parallel)
 
 Use these tools simultaneously for each part:
 
@@ -177,6 +219,20 @@ Use these tools simultaneously for each part:
    code, stock, price, package, specs, datasheet URL, EasyEDA footprint status.
    Optionally follow up with **`jlc_stock_check(mpn=MPN)`** if you need a real-time stock
    confirmation (jlc_get_part data can lag slightly).
+   > **Warning:** JLC description fields are summaries, not complete parameter tables.
+   > A missing temperature or RoHS field in JLC output does NOT mean the value is unknown —
+   > it means JLC did not include it in the description. Always proceed to DigiKey and Mouser.
+   >
+   > **Critical — JLC API miss ≠ not on LCSC:** `jlc_get_part` searches a local snapshot of
+   > LCSC's catalog. If it returns no results, the part may still be listed on LCSC.com.
+   > For any part not found by `jlc_get_part`, always follow up with a direct LCSC web search
+   > (`WebFetch("https://www.lcsc.com/search?q=MPN")`) before concluding the part is unavailable.
+   >
+   > **Critical — LCSC datasheet URL must be fetched:** When `jlc_get_part` returns a
+   > `datasheet` URL (usually `wmsc.lcsc.com` or `lcsc.com/datasheet/...`), that URL links to
+   > the actual manufacturer datasheet hosted by LCSC. Always call `WebFetch(url=datasheet_url)`
+   > to extract temperature, RoHS, and other parameters. This is where LCSC parametric data
+   > lives for Chinese-market parts that don't appear on Mouser or DigiKey.
 
 2. **`mouser_get_part(part_number=MPN)`** — Full Mouser lookup. Returns: detailed attributes
    including lifecycle status, RoHS, temperature range, stock, pricing tiers, datasheet link.
@@ -184,58 +240,133 @@ Use these tools simultaneously for each part:
 
 3. **`digikey_get_part(product_number=MPN)`** — DigiKey lookup. Returns: comprehensive
    parameters, availability, pricing, datasheet URL, lifecycle/status info.
+   > **DigiKey is MANDATORY for every part where JLC or Mouser data is incomplete.**
+   > DigiKey has the most normalized parameter tables of any distributor. Skipping DigiKey
+   > when data is incomplete is a workflow error. Specifically, call DigiKey if:
+   > - Temperature range is missing or N/A after JLC and Mouser
+   > - RoHS status is missing or ambiguous after JLC and Mouser
+   > - Lifecycle status is not clearly Active after JLC and Mouser
+   > - The part was not found in JLC
+   > - **Stock at JLC AND Mouser is zero** — DigiKey must always be the third stock check
+   >   before a STOCK FAIL verdict can be issued. CC0402FPNPO9BN560 had 185k pcs on DigiKey
+   >   when JLC=0 and Mouser=0. Never issue STOCK FAIL without a DigiKey stock check.
+   > - The part is in WARN status for any reason (unknown mfr, not found, low stock)
 
 4. **`cse_search(query=MPN)`** — ComponentSearchEngine lookup. Returns: additional datasheet
    URLs, package/footprint confirmation, and specs from a separate aggregator. Useful as a
    fourth data point when the three distributor APIs conflict or return incomplete data.
 
 > **API priority for data fields:**
-> - Lifecycle status: Mouser > DigiKey > manufacturer website
-> - RoHS: Mouser > DigiKey > datasheet
-> - Temperature range: Mouser attributes > DigiKey parameters > datasheet
-> - Stock quantity: compare across all three distributors (Mouser, DigiKey, LCSC), use the highest single-distributor value
+> - Lifecycle status: Manufacturer website > DigiKey > Mouser > LCSC
+> - RoHS: Datasheet compliance section > Manufacturer website > DigiKey > Mouser > LCSC
+> - Temperature range: Datasheet PDF (LCSC-hosted) > DigiKey parameters > Mouser attributes > JEDEC inference
+> - Stock quantity: compare JLC + Mouser + DigiKey for **every** part; zero at two distributors
+>   does NOT mean zero everywhere; all three must be checked before a stock verdict is issued
 
-### 2.2 Manufacturer Website, Datasheet PDF & Triple Verification
+---
 
-Distributor listings can be outdated or incomplete. Always perform this verification layer
-in addition to the API calls — especially for lifecycle status, RoHS, and temperature range.
+### 3.2 Mandatory Datasheet Fetch (NO EXCEPTIONS)
 
-**Step 1 — Manufacturer product page**
+**Fetching at least one datasheet per unique MPN is mandatory. This step cannot be skipped.**
+
+For every component:
+1. Check if any API (JLC, Mouser, DigiKey) returned a datasheet URL.
+2. If yes: call `WebFetch(url=datasheet_url)` with prompt:
+   `"Extract: operating temperature range min and max from Absolute Maximum Ratings and
+   Recommended Operating Conditions; RoHS compliance statement; package dimensions"`
+3. **For LCSC-hosted datasheets specifically:** `jlc_get_part` (lcsc code lookup) returns a
+   `datasheet` field pointing to `wmsc.lcsc.com` or `lcsc.com/datasheet/...`. This URL is the
+   actual manufacturer datasheet, not a summary. Always fetch it — it is the primary source
+   for Chinese-market parts that may not be indexed on Mouser or DigiKey.
+4. If no datasheet URL was returned by any API, run:
+   `WebSearch("[MPN] [manufacturer] datasheet filetype:pdf site:datasheet.octopart.com OR site:[manufacturer-domain]")`
+   Then fetch the first PDF result.
+5. Also check the **LCSC product page parametric table**: even when the JLC API returns empty
+   specs, the LCSC product page (`lcsc.com/product-detail/...`) shows operating temperature
+   and other parameters in a structured table. Fetch the LCSC product page when JLC API specs
+   are empty. The LCSC part code (lcsc field) gives the direct URL.
+6. From the datasheet or LCSC parametric table, extract:
+   - **Operating Temperature** — from "Absolute Maximum Ratings", "Recommended Operating Conditions", or parametric table
+   - **RoHS compliance** — from "Ordering Information", compliance section, LCSC ROHS badge, or RoHS/REACH declaration
+   - **Package confirmation** — from "Package Information" or "Mechanical Dimensions"
+7. Record the datasheet URL in the output — always.
+
+> **Why this is mandatory:** API description fields are aggregator summaries. Datasheets and
+> LCSC product pages are the primary source of truth. Any temperature range or RoHS status
+> that cannot be traced to a datasheet, LCSC page, or manufacturer page is unverified data.
+
+---
+
+### 3.3 Manufacturer Website Verification
+
+For lifecycle status specifically, always check the manufacturer's own product page:
+
 Use `WebSearch` to find the official manufacturer product page:
 > `[MPN] site:[manufacturer domain] product status`
 > e.g. `STM32F103C8T6 site:st.com product status`
 
 Then use `WebFetch` to read that page. Look for: Product Status, Lifecycle Phase,
-Last Order Date, Last Ship Date fields that manufacturers publish on their own pages.
-This is the most authoritative source for lifecycle — treat it as ground truth.
+Last Order Date, Last Ship Date. This is ground truth for lifecycle — treat it as such.
 
-**Step 2 — Datasheet PDF scan**
-If the distributor APIs returned a datasheet URL, fetch and scan it directly:
-```
-WebFetch(url=datasheet_url)
-```
-If no datasheet URL was found, search for one:
-> `[MPN] datasheet filetype:pdf`
+---
 
-Then fetch and scan the PDF. Extract:
-- **Operating Temperature** — look in "Absolute Maximum Ratings" and
-  "Recommended Operating Conditions" tables
-- **RoHS compliance** — look in "Ordering Information", "Compliance" section,
-  or a dedicated RoHS/REACH declaration at the end of the document
-- **Package/footprint confirmation** — look in "Package Information" or "Mechanical Dimensions"
+### 3.4 RoHS Reconciliation Rule
 
-**Step 3 — Reconcile and log all source values**
-For every critical field (lifecycle, temperature, RoHS), record what *each* source said —
-not just the final agreed value. This is the raw evidence log. When sources agree, great.
-When they disagree, that disagreement is itself a finding that needs to be surfaced to the user.
+**When a distributor labels a part "RoHS Compliant By Exemption," do NOT use this as
+the final RoHS answer.**
 
-Trust order when sources conflict:
-> - Lifecycle: Manufacturer website > DigiKey/Mouser > LCSC
-> - Temperature range: Datasheet PDF > Mouser attributes > DigiKey parameters
-> - RoHS: Datasheet compliance section > Mouser > DigiKey
-> - Stock: Use all three distributors — report each separately, highlight the maximum
+"By Exemption" means the component IS RoHS-3 compliant but contains a substance covered
+by a listed exemption provision (e.g., Exemption 7c-I for lead in high-temperature solder
+used in resistor terminations). This is a compliance characterization, not a
+non-compliance finding.
 
-### 2.3 Data to Collect Per Component
+Steps when you see "By Exemption":
+1. Check the manufacturer's own compliance page (e.g., Yageo compliance declarations,
+   Vishay RoHS page). Search: `"[manufacturer] [series] RoHS compliance declaration"`
+2. Check the datasheet compliance section.
+3. If the manufacturer confirms RoHS-3 compliance, record: **"Yes (RoHS-3, By Exemption [X])"**
+   with a note explaining the exemption and confirming compliance.
+4. Only mark as "Non-Compliant" if the manufacturer explicitly states the part does NOT
+   comply with RoHS.
+5. Flag a 🔴 SOURCE CONFLICT if the distributor label and manufacturer declaration
+   differ in wording — even if both ultimately indicate compliance.
+
+---
+
+### 3.5 N/A Policy (STRICT — violating this is a workflow error)
+
+**N/A may only be used for a field after ALL of the following have been attempted and
+specifically failed to return that field's value:**
+
+1. JEDEC/standard inference from part number or series (for passives)
+2. `jlc_get_part` (lcsc code) — check `specs` and `attributes` fields, not just `description`
+3. **LCSC product page** — `WebFetch("https://www.lcsc.com/product-detail/C{lcsc_code}.html")` — check the parametric table directly (often has temp when API specs is empty)
+4. **LCSC-hosted datasheet** — if `jlc_get_part` returns a `datasheet` URL, fetch it now
+5. `digikey_get_part` — check `parameters` field
+6. `mouser_get_part` — check `attributes` field
+7. `WebSearch("[MPN] datasheet operating temperature RoHS")` — fetch top result
+8. Manufacturer official product page (`WebFetch`)
+9. Datasheet PDF (`WebFetch` on datasheet URL or search result)
+
+**For every N/A in the final report, you MUST document:**
+- Which of the 9 steps above was attempted
+- What was found at each step (even if "parameter not listed")
+- Why the field remains unresolved
+
+**If more than 20% of parts have N/A in any single field (temperature, RoHS, or lifecycle),
+treat this as a red flag and re-examine your research process before writing the report.**
+
+**Anti-regression rule:** If a user manually finds a value on DigiKey or LCSC that the
+workflow missed, that is a process failure. After any such miss is reported:
+1. Immediately re-open the audit for all parts that share the same root cause.
+2. Identify which rule in this skill was not followed.
+3. Apply the missing lookup to all other parts that may have the same gap.
+4. Document the root cause in the report's conflict section.
+Do not treat user-found values as isolated exceptions — treat them as signals of systematic gaps.
+
+---
+
+### 3.6 Data to Collect Per Component
 
 For each field that has multiple source values, record all of them before settling on a final value.
 
@@ -247,17 +378,19 @@ For each field that has multiple source values, record all of them before settli
 | Lifecycle Status | Final value (Active / NRND / EOL / Discontinued / Unknown) |
 | Lifecycle — Source Breakdown | e.g. "Mouser: Active · DigiKey: Active · Mfr website: Active" |
 | Operating Temp Range | Final value (e.g. –40°C to +85°C) |
-| Temp Range — Source Breakdown | e.g. "Mouser: –40/+85°C · Datasheet PDF: 0/+70°C" |
-| RoHS Compliant | Final value (Yes / No / Unknown) |
-| RoHS — Source Breakdown | e.g. "Mouser: Yes · Datasheet: RoHS 3 compliant" |
+| Temp Range — Source Breakdown | e.g. "JEDEC X7R: –55/+125°C · DigiKey: –55/+125°C · Datasheet: –55/+125°C" |
+| RoHS Compliant | Final value (Yes / Yes-By-Exemption [N] / No / Unknown) |
+| RoHS — Source Breakdown | e.g. "Mouser: By Exemption · Manufacturer page: RoHS-3 Compliant" |
 | Stock — Mouser | pcs |
 | Stock — DigiKey | pcs |
 | Stock — LCSC | pcs (confirmed via jlc_stock_check if real-time accuracy needed) |
 | 🔴 Source Conflicts | List every field where sources disagreed and what each said |
-| Datasheet URL | Link to the PDF that was scanned |
+| Datasheet URL | Link to the PDF that was fetched |
 | Notes | Any other caveats or observations |
 
-### 2.4 Conflict Detection Rules
+---
+
+### 3.7 Conflict Detection Rules
 
 After collecting all source values for a component, apply these checks and mark the row
 with 🔴 **SOURCE CONFLICT** if any trigger:
@@ -266,6 +399,8 @@ with 🔴 **SOURCE CONFLICT** if any trigger:
 - Temperature range min or max differs by more than 5°C between any two sources
 - RoHS status contradicts between sources (one says Yes, another says No or Unknown)
 - A distributor's spec page and the manufacturer datasheet list different package codes
+- A distributor says "By Exemption" and you have not yet confirmed the manufacturer's
+  own compliance declaration
 
 A 🔴 conflict does **not** mean the part fails compliance — it means the data is uncertain and
 the engineer must manually verify before making a procurement decision. Always explain clearly
@@ -273,9 +408,33 @@ what was found on each source so they know exactly where to look.
 
 ---
 
-## Phase 4 — Compliance Evaluation
+## Phase 4 — Pre-Final Checklist (MANDATORY before writing any output)
 
-For each component, compare the collected data against the user's criteria from Phase 1.
+Before generating any report output, verify every item on this checklist. Do not proceed
+to Phase 5 until all items are checked.
+
+- [ ] Operating temperature is filled for **100%** of parts, OR each N/A documents all 9 research steps per the N/A Policy
+- [ ] RoHS is filled for **100%** of parts, OR each N/A documents all 9 research steps
+- [ ] Lifecycle is confirmed for **100%** of parts, OR clearly marked Unknown with steps documented
+- [ ] DigiKey was called for every part where JLC or Mouser returned incomplete parameters
+- [ ] DigiKey was called for **every WARN part** (not found / unknown manufacturer)
+- [ ] **DigiKey stock was checked before any STOCK FAIL verdict** — zero stock at JLC+Mouser does not mean zero everywhere
+- [ ] At least one datasheet URL was fetched per unique MPN
+- [ ] **LCSC product page was fetched** for any part where JLC API `specs` field was empty
+- [ ] **LCSC-hosted datasheet was fetched** when `jlc_get_part` returned a `datasheet` URL
+- [ ] For parts not found by `jlc_get_part`, a direct LCSC web search was performed
+- [ ] No more than 20% of parts have N/A in any single field; if exceeded, re-examine research
+- [ ] All "RoHS By Exemption" distributor labels are reconciled against manufacturer compliance pages
+- [ ] Source conflicts are documented with all source values — not just the final verdict
+- [ ] Stock data is cross-referenced across **all three distributors** (JLC, Mouser, DigiKey) per part
+- [ ] JEDEC inference was applied before any API call for all passive components
+- [ ] BOM-supplied manufacturer and component type labels were validated against distributor data (mismatches flagged)
+
+---
+
+## Phase 5 — Compliance Evaluation
+
+For each component, compare the collected data against the user's criteria from Phase 2.
 
 Assign a **Compliance Status**:
 - ✅ **PASS** — meets all criteria; all sources agree
@@ -294,7 +453,7 @@ This level of detail is what distinguishes a trustworthy BOM audit from a superf
 
 ---
 
-## Phase 5 — Output
+## Phase 6 — Output
 
 **Reports are always saved to:**
 ```
@@ -313,7 +472,7 @@ Ask the user which format they'd like:
 - **A) Markdown (default)** — clean `.md` file, readable in any editor or on GitHub
 - **B) Excel file (.xlsx)** — color-coded table. Use the `Bash` tool to generate it with `openpyxl`
   (install with `pip install openpyxl` if needed). Apply fill colors: green for PASS rows,
-  red for FAIL rows, orange for conflict rows.
+  red for FAIL rows, orange for conflict rows, yellow for WARN rows.
 - **C) Confluence wiki markup** — saved as `.txt`, ready to paste into Confluence
 - **D) Plain text** — concise `.txt` summary, good for quick review in terminal
 
@@ -331,7 +490,8 @@ After saving, print the full output path so the user knows exactly where to find
 **Section 2: Full Component Table**
 All components with all collected fields + compliance status.
 Include the per-field source breakdown columns so the engineer can trace every value.
-In Excel output, highlight 🔴 conflict rows in orange; FAIL rows in red; PASS rows in green.
+In Excel output, highlight 🔴 conflict rows in orange; FAIL rows in red; PASS rows in green;
+WARN rows in yellow.
 
 **Section 3: 🔴 Source Conflict Detail**
 A dedicated section listing every component where sources disagreed, showing:
@@ -352,7 +512,7 @@ Note to user that failing/warned components should be reviewed for replacement s
 ## Tips & Edge Cases
 
 - **Unknown MPNs**: If a part cannot be found in any API or via web search, mark as ⚠️ WARN
-  with note "Part not found — manual verification required"
+  with note "Part not found — manual verification required." Document all 7 N/A steps.
 - **Multiple hits for same MPN**: Pick the one matching the listed manufacturer; if ambiguous,
   note all candidates
 - **Batch efficiency**: Use Mouser's pipe-delimited batch lookup (`"MPN1|MPN2|..."`) to look up
@@ -366,3 +526,9 @@ Note to user that failing/warned components should be reviewed for replacement s
 - **Datasheet URLs**: Always include them — they let the engineer verify your findings directly
 - **Stock fluctuates**: Note the date/time of the lookup in your output so the user knows
   the data is a snapshot
+- **JLC description ≠ complete datasheet**: JLC's description field is a brief summary. Missing
+  temperature or RoHS in the JLC description means JLC didn't include it — not that it's unknown.
+  Always check DigiKey parameters and the datasheet before concluding a value is unavailable.
+- **JEDEC class is deterministic**: For MLCCs with a known dielectric code (C0G, X7R, X5R, etc.),
+  the temperature class is defined by the standard. You do not need an API call to know that
+  an X7R capacitor operates from –55 to +125°C. Record it, then confirm with a datasheet.
