@@ -9,7 +9,12 @@
       "Bash(claude mcp*)",
       "Write(OUTPUT/BOM/*)",
       "mcp__pcbparts__jlc_search_help",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "mcp__pcbparts__mouser_get_part",
+      "mcp__pcbparts__jlc_get_part",
+      "mcp__pcbparts__digikey_get_part",
+      "mcp__pcbparts__jlc_search",
+      "Bash(git:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
