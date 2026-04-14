@@ -227,3 +227,80 @@ V4 INN 0 AC -0.5
 .save V(NC1) V(NC2) V(INP) V(INN)
 .end
 ```
+
+---
+
+## Optocoupler digital input isolation (NPN driver + PC817 + P-ch MOSFET output)
+
+A common industrial pattern: a 5 V logic signal drives an optocoupler LED through an NPN transistor; the phototransistor output controls a P-channel MOSFET on an isolated 24 V rail.
+
+```spice
+* Optocoupler digital input isolation
+* 5V logic (GND domain) → PC817D → P-ch switch → 24V load (GND_OUT domain)
+* GND and GND_OUT share no common node — the isolation barrier is inside the optocoupler.
+
+* --- Sources ---
+V5B    PWR5B   0        DC 5
+V24    PWR24B  GND_OUT  DC 24
+VDIN   DIN     0        PULSE(0 5 0 10n 10n 500u 1m)   ; 1kHz logic pulse
+
+* --- Input stage: DIN → R1/R2 base divider → NPN → LED chain ---
+R1     DIN      N_BASE  10k
+R2     N_BASE   0       10k
+QNP    N_COLL   N_BASE  0   BC547B   ; NPN, C B E — library model
+
+* LED chain: PWR5B → LED → R_series → optocoupler anode
+R_LED  PWR5B    N_LED_A  330         ; sets IF ≈ 5mA at Vf~1.2V LED + Vce_sat
+DA1_LED N_LED_A N_LED_K  ...         ; LED inside optocoupler (or use subckt below)
+R4     N_LED_K  N_COLL   18
+
+* --- Optocoupler: use LTspice built-in PC817D if available ---
+* Option A — LTspice library (preferred):
+*   XDA1 N_LED_A N_LED_K N_OPT_C GND_OUT PC817 Igain=3.4m
+*   (Igain encodes CTR grade: A=1m B=1.5m C=2.3m D=3.4m)
+*
+* Option B — custom model (when PC817 not in lib.zip, e.g. different LTspice version):
+XDA1   N_LED_A  N_LED_K  N_OPT_C  GND_OUT  HCPL817
+
+* --- Output stage: 24V / GND_OUT domain ---
+R7     PWR24B   N_GATE   10k        ; pull gate high → P-ch OFF by default
+R6     N_OPT_C  N_GATE   100        ; opto collector drives gate low to turn P-ch ON
+MVP    DOUTA    N_GATE   PWR24B  PWR24B  IRF9540   ; P-ch: D G S Bulk
+C2     PWR24B   GND_OUT  100n       ; supply decoupling
+RLOAD  DOUTA    GND_OUT  1Meg       ; dummy load — keeps DOUTA defined when MVP is off
+
+* --- Custom optocoupler model (Option B) ---
+* Use Rsense + VCCS instead of Vsense + CCCS to avoid floating internal node.
+* CTR = 300% min → Gm = CTR / Rsense = 3.0 / 0.001 = 3000
+.subckt HCPL817 A K C E
+DLED    A   N_K  HCPL817_LED
+Rsense  N_K K    1m               ; 1mΩ sense: V(N_K,K) = I_LED × 1e-3
+G1      C   E    N_K  K   3000    ; VCCS: I(C→E) = 3000 × V(N_K,K) = 3 × I_LED
+DCBE    E   C    HCPL817_CLM      ; reverse-clamp (prevents negative Ic)
+Ciso    A   E    0.5p             ; isolation capacitance typ
+Rleak   K   E    100Meg           ; DC path for node K (>10^9Ω physically)
+.model HCPL817_LED D(Is=1e-25 N=1.7 Rs=10 BV=6 Vj=0.75)
+.model HCPL817_CLM D(Is=1e-14 N=1 Rs=1)
+.ends HCPL817
+
+* IRF9540 P-ch (not in LTspice 26 lib.zip — embed required)
+.model IRF9540 PMOS(Level=3 Gamma=0 Delta=0 Eta=0 Theta=0 Kappa=0.2 Vmax=0 Xj=0
++ Tox=97.5n Uo=157 Phi=0.6 Rs=0.7017m Kp=10.15u W=0.35 L=2u Vto=-3.93
++ Rd=0.3571 Rds=1.667Meg Cbd=3.229n Pb=0.8 Mj=0.5 Fc=0.5
++ Cgso=9.027e-9 Cgdo=2.071e-10 Is=0.3456p N=1 Tt=880n)
+
+* --- Analysis ---
+.tran 0 5m 0 1u         ; 5ms = 5 cycles, maxstep 1µs
+.op
+.options gmin=1e-10 abstol=1e-9
+.save V(DIN) V(N_BASE) V(N_COLL) V(N_LED_A) V(N_LED_K) V(N_OPT_C) V(N_GATE) V(DOUTA)
+.end
+```
+
+**Key design notes for this topology:**
+- `GND` and `GND_OUT` must never share a node — all components must be on one side of the barrier.
+- The P-ch gate pull-up (R7) ensures the output is **off by default** (fail-safe) when the LED is dark.
+- `RLOAD` (1 MΩ) is not a real circuit component — it gives `DOUTA` a DC return path for `.op` / `.tran` startup. Remove or replace with the real load.
+- If using the LTspice PC817 subcircuit (Option A), delete the custom `.subckt HCPL817` block entirely.
+- LTspice `.asc` placement: use `SYMBOL Optos/PC817D sx sy R0` with pin offsets A=(-96,-48), K=(-96,+48), C=(+96,-48), E=(+96,+48) relative to symbol center.
+

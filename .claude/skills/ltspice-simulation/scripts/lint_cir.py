@@ -20,28 +20,88 @@ CLI:
 """
 
 from __future__ import annotations
-import re, sys, pathlib
+import re, sys, pathlib, zipfile
 from collections import defaultdict
 
-# Built-in LTspice parts we accept without a local .model definition.
-# Keep this in sync with references/ltspice_builtin_parts.md.
-BUILTINS = {
-    # Diodes
-    "1N4148", "1N4001", "1N4002", "1N4003", "1N4004", "1N4005", "1N4006",
-    "1N4007", "1N5817", "1N5818", "1N5819", "1N5820", "1N5821", "1N5822",
-    "MBR0520", "BAT54", "BZX84C5V1", "1N4733A", "1N914",
-    # BJTs
-    "2N3904", "2N3906", "2N2222", "2N2907", "BC547", "BC557", "MMBT3904",
-    "TIP31", "TIP32", "2N5088", "2N5089",
-    # MOSFETs
-    "IRF540", "IRF9540", "IRF3205", "BS170", "BS250", "Si4410DY", "2N7002",
-    "IRF510", "IRF520", "IRF530", "IRFZ44",
-    # JFETs
-    "2N5457", "2N3819", "J113",
-    # Op-amps / subckts
-    "UniversalOpAmp2", "UniversalOpAmp", "LT1001", "LT1013", "LT1028",
-    "LT1078", "LT1086", "LT3080", "LM317", "AD8601", "AD820", "NE555",
+# Fast-path set: always accept these without hitting lib.zip.
+# Only contains parts that were positively confirmed in lib.zip for LTspice 26.
+# Do NOT add parts here unless you have verified them with query_lib.py.
+BUILTINS: set[str] = {
+    # Diodes (standard.dio, latin-1)
+    "1N914", "1N4148", "MMSD4148",
+    "1N5817", "1N5818", "1N5819",
+    "BAT54", "MBR0520L", "MBR0530L",
+    # BJTs (standard.bjt, UTF-16-LE)
+    "2N2222", "2N2907", "2N3904", "2N3906",
+    "BC547B", "BC547C", "BC557B",
+    # MOSFETs (standard.mos, UTF-16-LE)
+    "BS170", "2N7002", "Si4410DY",
+    # Op-amp macromodels (always available in LTspice)
+    "UniversalOpAmp2", "UniversalOpAmp",
 }
+
+# Cached lib.zip lookup results (model_name -> bool)
+_lib_zip_cache: dict[str, bool] = {}
+_lib_zip_path: pathlib.Path | None = None
+
+def _find_lib_zip() -> pathlib.Path | None:
+    global _lib_zip_path
+    if _lib_zip_path is not None:
+        return _lib_zip_path
+    candidates = [
+        pathlib.Path.home() / "AppData/Local/Programs/ADI/LTspice/lib.zip",
+        pathlib.Path("C:/Program Files/ADI/LTspice/lib.zip"),
+        pathlib.Path("C:/Program Files (x86)/ADI/LTspice/lib.zip"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            _lib_zip_path = c
+            return c
+    return None
+
+def _decode(raw: bytes) -> str:
+    if len(raw) >= 4 and raw[1] == 0 and raw[3] == 0:
+        return raw.decode("utf-16-le", errors="replace")
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16", errors="replace")
+    return raw.decode("latin-1", errors="replace")
+
+def _in_lib_zip(name: str) -> bool:
+    """Return True if `name` is found as a .model, .subckt, or symbol in lib.zip."""
+    key = name.upper()
+    if key in _lib_zip_cache:
+        return _lib_zip_cache[key]
+    lib = _find_lib_zip()
+    if lib is None:
+        _lib_zip_cache[key] = False
+        return False
+    name_lower = name.lower()
+    try:
+        with zipfile.ZipFile(lib) as z:
+            for entry in z.namelist():
+                ext  = pathlib.PurePosixPath(entry).suffix.lower()
+                stem = pathlib.PurePosixPath(entry).stem.lower()
+                # Symbol file match
+                if ext == ".asy" and (stem == name_lower or name_lower in stem):
+                    _lib_zip_cache[key] = True
+                    return True
+                # Model/subcircuit content match
+                if ext in {".bjt", ".mos", ".dio", ".jft", ".sub", ".lib"}:
+                    try:
+                        content = _decode(z.read(entry))
+                        pat = re.compile(
+                            r"^\.(model|subckt)\s+" + re.escape(name) + r"\b",
+                            re.IGNORECASE | re.MULTILINE,
+                        )
+                        if pat.search(content):
+                            _lib_zip_cache[key] = True
+                            return True
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    _lib_zip_cache[key] = False
+    return False
 
 UNICODE_BAD = ["µ", "Ω", "\u03BC", "\u03A9"]
 
@@ -181,11 +241,14 @@ def lint(path: str):
     for line_no, name in model_refs:
         if name in defined_models or name in defined_subckts:
             continue
-        if name in BUILTINS:
+        if name.upper() in {b.upper() for b in BUILTINS}:
+            continue
+        # Dynamic fallback: search lib.zip
+        if _in_lib_zip(name):
             continue
         problems.append(
             f"Line {line_no}: reference to {name!r} but no .model or .subckt defining it, "
-            "and it is not on the built-in list. Embed the model or substitute a builtin."
+            "and it was not found in lib.zip. Embed the model or substitute a known part."
         )
 
     # --- 'M' vs 'Meg' heuristic ---

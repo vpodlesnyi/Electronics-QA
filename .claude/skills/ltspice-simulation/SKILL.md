@@ -70,14 +70,34 @@ Also add `.save` for every labeled net so the waveform viewer shows useful probe
 
 ### Step 4 — Emit the `.cir` netlist
 
-Write the netlist using `scripts/write_cir.py` (see below). The script enforces the conventions LTspice needs. If you're writing by hand, the rules are:
+#### 4a — Library-first lookup (mandatory, do this before writing any `.model` card)
+
+For **every semiconductor or IC** in the circuit, run:
+
+```
+python scripts/query_lib.py <part_name>
+```
+
+Then follow this priority ladder — **stop at the first tier that matches:**
+
+| Tier | Condition | Action |
+|---|---|---|
+| **1 — Library subcircuit** | `query_lib.py` reports the part in `lib/sub/*.sub` as a `.subckt` | Write `X<n> <pins> <subckt_name>` in the .cir. LTspice finds it from lib.zip automatically — no `.lib` directive, no embedded model. |
+| **2 — Library model** | `query_lib.py` reports the part in `lib/cmp/*` as a `.model` | Write the device card (`Q`, `M`, `D`, …) referencing that model name. No embed needed. |
+| **3 — Symbol only** | `query_lib.py` finds a `lib/sym/**/*.asy` with a `SpiceModel` pointing to a `.sub` | The `.sub` is also in lib.zip. Use the `Value2` subcircuit call shown by the script. Prefer using the symbol in the `.asc`; for `.cir`, use the X-call shown. |
+| **4 — Not found** | `query_lib.py` exits 1 (no match) | Only now embed a custom `.model` or `.subckt` inline in the `.cir`. Comment the source of the parameters. |
+
+> **Why this order matters:** LTspice 26 no longer ships `standard.bjt` / `standard.mos` as loadable files — only `lib.zip`. A model name that "worked in LTspice XVII" will silently fail in LTspice 26 unless either the library file is present or the model is embedded. Tier 1–3 ensures the simulation uses the vendor-validated model from lib.zip; Tier 4 is the fallback for parts Analog Devices has not included.
+
+#### 4b — Write the netlist
+
+Use `scripts/write_cir.py` (see Bundled assets below). If writing by hand:
 
 - First line: title comment starting with `*`, naming the circuit and the generation date.
 - Node `0` is ground. All labeled rails get a `V` source tied to `0`.
 - Device letters: `R`, `C`, `L`, `D`, `Q` (BJT), `M` (MOSFET), `J` (JFET), `V`, `I`, `X` (subcircuit), `E/G/H/F` (controlled sources).
 - Values in engineering notation LTspice understands: `10k`, `4.7u`, `100n`, `1Meg`, `2.2G`. Never `uF`, never `µ`, never unicode. LTspice will barf.
-- Semiconductors reference a `.model` card or a built-in part name. Use built-ins whenever possible (see `references/ltspice_builtin_parts.md`) so the user does not need external library files.
-- For unknown ICs: emit a `.subckt <name> …` stub and comment clearly that the user must drop in the vendor's SPICE model.
+- For unknown ICs not in lib.zip: emit a `.subckt <name> …` stub and comment clearly that the user must drop in the vendor's SPICE model.
 - End with `.end`.
 
 Save to `OUTPUT/SCH/<circuit_name>.cir`, where `<circuit_name>` is the source image's filename stem unless the user specified otherwise. Keep the name slug-safe (ASCII, no spaces, only `_` or `-` as separators). Create `OUTPUT/SCH/` if it doesn't exist.
@@ -109,11 +129,12 @@ These rules exist because they're where this skill fails in practice. Break them
 - **Never invent part numbers.** If an IC's markings are unreadable, ask. Substituting a "plausible" chip will produce a simulation of a different circuit.
 - **Never silently correct topology.** If the image shows op-amp inputs wired backwards, electrolytic reversed, or feedback missing, surface it as a question. The user may have drawn it wrong, or you may have read it wrong — let them decide.
 - **Comment the netlist liberally.** Every section labeled, every assumption restated in a `*` comment, every model source credited.
-- **Keep the netlist self-contained.** Embed `.model` and `.subckt` cards in the file. Do not rely on the user having a specific LTspice library installed.
+- **Prefer library references over embedded models.** Run `scripts/query_lib.py` for every semiconductor before writing a `.model` card. If the part is in lib.zip, reference it by name — do not duplicate it inline. Only embed a `.model` or `.subckt` if `query_lib.py` exits 1 (not found).
 
 ## Bundled assets
 
-- `references/ltspice_builtin_parts.md` — List of parts that ship with LTspice and the exact names to use in netlists. Consult this before referencing a semiconductor model, so you don't emit a `.model` call the user's LTspice can't resolve.
+- `scripts/query_lib.py` — **Run this first for every semiconductor before writing any `.model` card.** Searches the LTspice `lib.zip` for a part by name and reports: symbol path (for `.asc`), subcircuit name and call syntax (for `.cir`), and the exact `.model` line to embed if the part is absent. Exit 0 = found in library; exit 1 = not found, embed required.
+- `references/ltspice_builtin_parts.md` — Summary of what's in the LTspice library, indexed by category. Reflects LTspice 26 `lib.zip` reality. The old `standard.bjt` / `standard.mos` are gone — verify with `query_lib.py` rather than assuming a part name works.
 - `references/spice_syntax_cheatsheet.md` — Device card syntax, engineering notation, valid analysis directives, common mistakes. Skim this when writing a netlist by hand.
 - `references/circuit_templates.md` — Canonical SPICE patterns for common topologies (op-amp inverting/non-inverting, RC/RLC filters, BJT CE amplifier, 555 astable, buck converter, diode bridge). Use as scaffolds when the vision pass clearly identifies one of these topologies — not blind copies, but starting points.
 - `scripts/write_cir.py` — Helper that takes a structured Python dict describing components, nets, sources, and the analysis directive, and writes a linter-clean `.cir` file. Use this in preference to formatting strings by hand; it enforces the conventions above.
@@ -130,6 +151,9 @@ These rules exist because they're where this skill fails in practice. Break them
 | Simulation fails to converge on first run | Add `.options gmin=1e-10 abstol=1e-9`, soften source edges with `Trise`/`Tfall`, reduce `maxstep`. Comment every tweak. |
 | Unrecognized IC | Emit a `.subckt` stub with pin names, comment clearly that the user must supply a vendor model. Proceed with the rest of the netlist. |
 | User can't answer the readback questions | Do not emit SPICE on a coin flip. Offer to proceed with explicit assumptions only if the user says so in writing. |
+| LTspice warns "floating node" on a custom subcircuit | You used `Vsense N_K K 0` + `F1` (CCCS) to sense LED current. Node `N_K` has no DC path. Replace with `Rsense N_K K 1m` + `G1 C E N_K K <Gm>` (VCCS, where Gm = CTR/Rsense). See cheatsheet gotcha #7. |
+| High-impedance output node undefined at `.op` or transient start | Add a dummy load to ground (`RLOAD OUT GND 1Meg`) so the node has a DC path when the driving switch is off. Note the resistor in a comment so the user knows it is not on the physical schematic. |
+| `query_lib.py` misses a known BJT/MOSFET in lib.zip | LTspice 26 encodes `standard.bjt` / `standard.mos` as UTF-16-LE, which latin-1 decoding silently mangles. The script uses null-byte detection to handle this. If a known-good part still fails, re-run with `python scripts/query_lib.py <part>` and check the raw output; the encoding heuristic may need updating for unusual builds. |
 
 ## Example session (abridged)
 

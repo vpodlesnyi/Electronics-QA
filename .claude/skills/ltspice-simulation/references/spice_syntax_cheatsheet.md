@@ -155,3 +155,11 @@ The `M` vs `Meg` collision is the #1 bug in hand-written SPICE. 1M means 1 milli
 4. **Convergence failures on switchers:** soft-start the input (Tr=1m on the V source), loosen `.options gmin abstol`, reduce maxstep.
 5. **Op-amp rails missing:** universal op-amp subcircuits need V+ and V- connected to real rails, not left floating.
 6. **Electrolytic polarity is not enforced in SPICE** but is enforced in LTspice's default component library if the user opens the `.asc`. When writing `.cir` directly, just get the polarity right in the netlist and comment it.
+7. **CCCS + Vsense causes a floating internal node in subckts.** The classic current-sensing idiom `Vsense N_K K 0` + `F1 C E Vsense <gain>` leaves node `N_K` with no guaranteed DC path — LTspice warns "floating node" and may fail to converge. **Fix:** replace with a 1mΩ sense resistor and a VCCS:
+   ```spice
+   Rsense  N_K  K   1m
+   G1      C    E   N_K  K   <Gm>   ; Gm = CTR / Rsense
+   ```
+   For CTR = 300 % (0 = 3.0) and Rsense = 1m: `Gm = 3.0 / 0.001 = 3000`. Node N_K now has a DC path through Rsense and the simulation converges cleanly.
+8. **High-impedance output node needs a DC path.** If an output is driven only through a switch (MOSFET/BJT/optocoupler phototransistor), add a dummy load resistor — e.g. `RLOAD DOUTA GND 1Meg` — so the node is defined when the switch is off. Without it, SPICE cannot establish the DC operating point and `.op` or `.tran` startup will fail or produce garbage.
+9. **Symbol name ≠ subcircuit name for parametric Optos symbols.** LTspice's `Optos/PC817D` symbol has `Value2 = "PC817 Igain=3.4m"`. The subcircuit inside `PC817.sub` is named `PC817`, not `PC817D`. Write the `.cir` X-call as `X<n> A K C E PC817 Igain=3.4m` — not `PC817D`. The grade (A/B/C/D) is encoded in the `Igain` parameter, not the subcircuit name.
