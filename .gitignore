@@ -5,6 +5,13 @@ INPUT/BOM/*
 OUTPUT/BOM/*
 !OUTPUT/BOM/.gitkeep
 
+# Keep folder structure but ignore all files inside INPUT/SCH and OUTPUT/SCH
+INPUT/SCH/*
+!INPUT/SCH/.gitkeep
+
+OUTPUT/SCH/*
+!OUTPUT/SCH/.gitkeep
+
 # Dependencies
 node_modules/
 
