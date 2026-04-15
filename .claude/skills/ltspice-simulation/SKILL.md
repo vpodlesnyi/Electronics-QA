@@ -131,6 +131,46 @@ These rules exist because they're where this skill fails in practice. Break them
 - **Comment the netlist liberally.** Every section labeled, every assumption restated in a `*` comment, every model source credited.
 - **Prefer library references over embedded models.** Run `scripts/query_lib.py` for every semiconductor before writing a `.model` card. If the part is in lib.zip, reference it by name — do not duplicate it inline. Only embed a `.model` or `.subckt` if `query_lib.py` exits 1 (not found).
 
+## Generating `.asc` schematic files
+
+When the task is to produce an LTspice `.asc` schematic (rather than a plain `.cir`
+netlist), apply the rules in `references/asc_generation_rules.md` in full. Key points:
+
+### Symbol placement
+Always derive `SX, SY` from where the pin must land — never hardcode. Pattern:
+```python
+SX = node_x - rot(local_pin_x, local_pin_y, rotation)[0]
+SY = node_y - rot(local_pin_x, local_pin_y, rotation)[1]
+```
+Apply horizontal scale factor `H` only to x-coordinates. Never apply it to y-coords,
+pin local offsets, or stub sizes.
+
+### Stub direction — body-clearance rule
+Every pin stub must exit *away from* the component body. The direction that goes
+toward the body interior is forbidden even if it would reach the target node:
+
+- Resistor R0: A stubs UP, B stubs DOWN.
+- Capacitor R0: A stubs UP, B stubs DOWN.
+- NPN R0: C stubs UP, B stubs LEFT, E stubs DOWN.
+- **PMOS R0: D stubs UP, G stubs LEFT, S stubs DOWN — never UP for S.**
+- PMOS S going up to a supply rail: stub S downward first, detour in x, then route up.
+
+If body clearance and stub clearance conflict, body clearance wins. Place the pin
+directly at the node (zero stub) rather than route through the body.
+
+### Bus wires over net labels
+Power and GND rails use physical horizontal bus wires with a single flag per rail.
+Do not place individual flags on each component pin. Net labels are acceptable only
+where a direct wire would cross another wire or cross an isolation barrier.
+
+### No speculative `.options`
+Do not add `.options gmin` or `.options abstol` by default. These can break simulations
+that run correctly without them. Add only when a simulation actually fails and the
+user explicitly requests convergence tuning.
+
+See `references/asc_generation_rules.md` for the full ruleset, the per-component stub
+direction table, and the validation checklist.
+
 ## Bundled assets
 
 - `scripts/query_lib.py` — **Run this first for every semiconductor before writing any `.model` card.** Searches the LTspice `lib.zip` for a part by name and reports: symbol path (for `.asc`), subcircuit name and call syntax (for `.cir`), and the exact `.model` line to embed if the part is absent. Exit 0 = found in library; exit 1 = not found, embed required.
@@ -148,7 +188,7 @@ These rules exist because they're where this skill fails in practice. Break them
 | Image too blurry to read values reliably | Ask the user for a higher-resolution image or a textual component list. Don't guess. |
 | LTspice not installed on a Windows machine | Link the user to https://www.analog.com/en/resources/design-tools-and-calculators/ltspice-simulator.html and provide the `.cir` file path. |
 | Non-Windows OS | Skip auto-launch; deliver the `.cir` with a note on how to open it. |
-| Simulation fails to converge on first run | Add `.options gmin=1e-10 abstol=1e-9`, soften source edges with `Trise`/`Tfall`, reduce `maxstep`. Comment every tweak. |
+| Simulation fails to converge on first run | First try: soften source edges (`Trise`/`Tfall`), reduce `maxstep`. If still failing, try `reltol=0.01` before touching `gmin`/`abstol`. Only add `gmin`/`abstol` as a last resort — they can break circuits with subcircuit-based models (optocouplers, regulators) that run correctly at defaults. Comment every option added and why. |
 | Unrecognized IC | Emit a `.subckt` stub with pin names, comment clearly that the user must supply a vendor model. Proceed with the rest of the netlist. |
 | User can't answer the readback questions | Do not emit SPICE on a coin flip. Offer to proceed with explicit assumptions only if the user says so in writing. |
 | LTspice warns "floating node" on a custom subcircuit | You used `Vsense N_K K 0` + `F1` (CCCS) to sense LED current. Node `N_K` has no DC path. Replace with `Rsense N_K K 1m` + `G1 C E N_K K <Gm>` (VCCS, where Gm = CTR/Rsense). See cheatsheet gotcha #7. |
