@@ -197,6 +197,109 @@ or softer source rise/fall times before touching `gmin` or `abstol`.
 
 ---
 
+## 9. Label and text placement
+
+### 9.1 Core priority rule
+
+**Wires always have higher priority than text.**  
+Text adapts to wiring — wiring never moves to accommodate text.
+
+### 9.2 Wire clearance
+
+Every piece of text (component label, net label, value) must be at least  
+**LABEL_CLEARANCE = 16 px (1 grid unit)** away from every wire segment,  
+measured as the perpendicular distance from the text origin to the nearest wire.
+
+When `_wire_clearance(text_x, text_y)` returns < 16, shift the text in steps of 16 px
+(alternating + / − in y first, then in x) until a clear position is found.
+
+### 9.3 WINDOW override mechanism
+
+LTspice reads `WINDOW` lines in the SYMBOL block of the `.asc` to override the  
+per-instance label positions from the `.asy` defaults. Offsets are in **screen  
+coordinates** (not rotated with the symbol). Format:
+
+```
+SYMBOL <name> SX SY R
+WINDOW 0 <dx> <dy> <justification> <font_size>   ← InstName
+WINDOW 3 <dx> <dy> <justification> <font_size>   ← Value
+SYMATTR InstName …
+SYMATTR Value …
+```
+
+`WINDOW` lines **must appear before** any `SYMATTR` lines in the SYMBOL block.
+
+### 9.4 Per-component label placement table
+
+All offsets are screen-space (dx, dy) relative to the symbol origin (SX, SY).
+Font size 2 throughout. Verified clear of wires for all placements in this table.
+
+| Component | Rotation | WINDOW 0 (InstName) | WINDOW 3 (Value) | Notes |
+|---|---|---|---|---|
+| `res` | R0 (vertical) | (36, 24) | (36, 64) | Right of body |
+| `res` | R270 (horizontal) | (56, −52) | (56, 16) | Above / below body |
+| `cap` | R0 | (36, −8) | (36, 56) | Right of body, above top |
+| `diode` | R0 | (36, −8) | (36, 56) | Right of body |
+| `npn` | R0 | — (use .asy default) | — | Default (56,32)/(56,68) OK |
+| `pmos` | R0 | — (use .asy default) | — | Default (56,32)/(56,72) OK |
+| `voltage` | R0 | — (use .asy default) | — | Default (24,16)/(24,96) OK |
+| `PC817x` | R0 | — (use .asy default) | — | Default (0,−80)/(0,80) Centre OK |
+
+**Body bounding boxes for reference (R0):**
+
+| Symbol | x range | y range |
+|---|---|---|
+| `res` vertical | SX+0 … SX+32 | SY+16 … SY+96 |
+| `res` horizontal (R270, screen) | SX+16 … SX+96 | SY−32 … SY |
+| `cap` vertical | SX+0 … SX+32 | SY+0 … SY+64 |
+| `diode` vertical | SX+0 … SX+32 | SY+0 … SY+64 |
+| `npn` | SX+0 … SX+64 | SY+0 … SY+96 |
+| `pmos` | SX+0 … SX+48 | SY+0 … SY+96 |
+| `voltage` | SX−32 … SX+32 | SY+24 … SY+88 |
+| `PC817x` | SX−96 … SX+96 | SY−64 … SY+64 |
+
+### 9.5 Net label (FLAG) placement
+
+Informational net labels use a **INFO_OFFSET = 32 px (2 grid units)** stub so the  
+flag coordinate sits at least one grid unit above the text bottom edge:
+
+```python
+# Upward stub — text renders above flag point (font height ≈ 16 px)
+# Wire at y=400, stub 32 px up, flag at y=368 → text occupies y=352..368 → gap=32 px ✓
+wire(node_x, node_y, node_x, node_y - INFO_OFFSET)
+flag(node_x, node_y - INFO_OFFSET, "LABEL_NAME")
+```
+
+Use `INFO_OFFSET = 32` (not 16) to guarantee the text bottom edge clears the wire  
+by at least one full grid unit.
+
+For **power/GND bus flags** (placed at bus wire ends) the flag is on the bus wire itself.  
+This is the standard LTspice convention — no offset needed for bus flags.
+
+### 9.6 Auto-adjustment algorithm
+
+`gen_asc.py` implements `_safe_window(sx, sy, dx, dy)` which:
+1. Computes world position `(sx+dx, sy+dy)`.
+2. Calls `_wire_clearance(wx, wy)` → perpendicular distance to nearest wire.
+3. If distance ≥ `LABEL_CLEARANCE`, returns `(dx, dy)` unchanged.
+4. Otherwise tries `dy ± k×LABEL_CLEARANCE` for k = 1, 2, 3, 4, 5 (alternating signs).
+5. Returns first clear position found; falls back to original if none found.
+
+```python
+LABEL_CLEARANCE = 16   # 1 grid unit
+
+def _wire_clearance(px, py):
+    for x1,y1,x2,y2 in _wires:       # _wires built by wire() calls
+        if x1==x2:                    # vertical
+            d = abs(px-x1) if y1<=py<=y2 else abs(px-x1)+min(abs(py-y1),abs(py-y2))
+        else:                          # horizontal
+            d = abs(py-y1) if x1<=px<=x2 else abs(py-y1)+min(abs(px-x1),abs(px-x2))
+        if d < LABEL_CLEARANCE: return d
+    return float('inf')
+```
+
+---
+
 ## 8. Validation checklist (run before every `.asc` handoff)
 
 - [ ] No wire goes from a pin toward the component's own body interior

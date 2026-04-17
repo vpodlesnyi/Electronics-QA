@@ -20,8 +20,8 @@ The user has a picture of a circuit — a screenshot from KiCad/Altium/EasyEDA, 
 This skill lives in the `electronics-qa` repository and uses fixed folders for input and output. Respect them; do not scatter files elsewhere.
 
 - **Input — schematic images:** `INPUT/SCH/` (relative to the repository root). Pick up `.png`, `.jpg`, `.jpeg`, or `.bmp` files from here. If the user refers to "the schematic" or "my circuit" without naming a file, list what's in `INPUT/SCH/` and confirm which one they mean before proceeding.
-- **Output — generated netlists:** `OUTPUT/SCH/`. Write every `.cir` here. Name the file after the source image's stem (e.g. `INPUT/SCH/preamp_v2.png` → `OUTPUT/SCH/preamp_v2.cir`). If the user gave the circuit a different name, use that — but keep it slug-safe (ASCII, no spaces, only `_` or `-` as separators).
-- **Sidecar artifacts** (readback.md, simulation_notes.md) are allowed next to the `.cir` in `OUTPUT/SCH/` only if the user asks for them. By default, emit the readback inline in chat and keep `OUTPUT/SCH/` to just the `.cir` files. The goal is for the user to open that folder and see only deliverables.
+- **Output — generated schematics:** `OUTPUT/SCH/`. Write every `.asc` here (`.cir` only when the user explicitly requests a plain netlist). Name the file after the source image's stem (e.g. `INPUT/SCH/preamp_v2.png` → `OUTPUT/SCH/preamp_v2.asc`). Keep names slug-safe (ASCII, no spaces, only `_` or `-` as separators).
+- **Sidecar artifacts** (readback.md, simulation_notes.md) are allowed next to the `.asc` in `OUTPUT/SCH/` only if the user asks for them. By default, emit the readback inline in chat and keep `OUTPUT/SCH/` to just the deliverable files.
 
 If either folder doesn't exist yet, create it. Never save final deliverables to the repository root or to `/tmp`.
 
@@ -85,24 +85,28 @@ Then follow this priority ladder — **stop at the first tier that matches:**
 | **1 — Library subcircuit** | `query_lib.py` reports the part in `lib/sub/*.sub` as a `.subckt` | Write `X<n> <pins> <subckt_name>` in the .cir. LTspice finds it from lib.zip automatically — no `.lib` directive, no embedded model. |
 | **2 — Library model** | `query_lib.py` reports the part in `lib/cmp/*` as a `.model` | Write the device card (`Q`, `M`, `D`, …) referencing that model name. No embed needed. |
 | **3 — Symbol only** | `query_lib.py` finds a `lib/sym/**/*.asy` with a `SpiceModel` pointing to a `.sub` | The `.sub` is also in lib.zip. Use the `Value2` subcircuit call shown by the script. Prefer using the symbol in the `.asc`; for `.cir`, use the X-call shown. |
-| **4 — Not found** | `query_lib.py` exits 1 (no match) | Only now embed a custom `.model` or `.subckt` inline in the `.cir`. Comment the source of the parameters. |
+| **4 — Internet vendor model** | `query_lib.py` exits 1 (no match in lib.zip) | Search the web for a SPICE model published by the component manufacturer (e.g. ON Semi, Vishay, Infineon, Broadcom). Preferred sources in order: (a) manufacturer's product page → "SPICE model" or "simulation model" download; (b) well-known SPICE model archives (Spice Models DB, LTspice Users Group, component distributor model libraries). Download or copy the `.model` / `.subckt` text, embed it inline in the `.cir`, and add a comment crediting the source URL and retrieval date. |
+| **5 — Library alternative** | Vendor model not found on the internet, but a functionally similar part exists in lib.zip | Choose a lib.zip part with matching topology (same device type: NPN/PNP/NMOS/PMOS/diode), similar key parameters (Vce_max or Vds_max, Ic_max or Id_max, hFE or Vth), and the same package type if relevant. Reference it by its lib.zip name. Add a prominent `* SUBSTITUTE:` comment naming the original part, the substitute used, and which parameters may differ. |
+| **6 — Internet alternative** | Lib.zip has no close match either | Search the web for a SPICE model of a functionally equivalent part from a different manufacturer. Apply the same substitution comment rules as Tier 5. |
+| **7 — Custom model (last resort)** | All of the above have failed | Only now hand-craft a `.model` or `.subckt` from datasheet parameters. Comment every parameter and its datasheet source. This is the last resort — do not reach for it while any of Tiers 1–6 remain viable. |
 
-> **Why this order matters:** LTspice 26 no longer ships `standard.bjt` / `standard.mos` as loadable files — only `lib.zip`. A model name that "worked in LTspice XVII" will silently fail in LTspice 26 unless either the library file is present or the model is embedded. Tier 1–3 ensures the simulation uses the vendor-validated model from lib.zip; Tier 4 is the fallback for parts Analog Devices has not included.
+> **Why this order matters:** LTspice 26 no longer ships `standard.bjt` / `standard.mos` as loadable files — only `lib.zip`. A model name that "worked in LTspice XVII" will silently fail in LTspice 26 unless the library file is present or the model is embedded. Tiers 1–3 use the vendor-validated model from lib.zip. Tiers 4–6 leverage real SPICE models from the internet or close lib.zip equivalents before resorting to a hand-crafted model, which is the least reliable path.
 
-#### 4b — Write the netlist
+#### 4b — Generate the .asc schematic
 
-Use `scripts/write_cir.py` (see Bundled assets below). If writing by hand:
+Use `scripts/gen_asc.py` (see Bundled assets). The script encodes pin geometry, stub/bus rules, and SPICE directives for the circuit. When adding a new circuit, update or extend gen_asc.py following the rules in `references/asc_generation_rules.md`.
 
-- First line: title comment starting with `*`, naming the circuit and the generation date.
-- Node `0` is ground. All labeled rails get a `V` source tied to `0`.
-- Device letters: `R`, `C`, `L`, `D`, `Q` (BJT), `M` (MOSFET), `J` (JFET), `V`, `I`, `X` (subcircuit), `E/G/H/F` (controlled sources).
-- Values in engineering notation LTspice understands: `10k`, `4.7u`, `100n`, `1Meg`, `2.2G`. Never `uF`, never `µ`, never unicode. LTspice will barf.
-- For unknown ICs not in lib.zip: emit a `.subckt <name> …` stub and comment clearly that the user must drop in the vendor's SPICE model.
-- End with `.end`.
+**Mandatory rules (full detail in asc_generation_rules.md):**
+- Every pin has a 48 px (3-grid) stub exiting *away from* the component body. Body clearance always wins over stub clearance.
+- Derive symbol origin from pin-landing math: `SX = node_x − rot(local_pin_x, local_pin_y, R)[0]`. Never hardcode.
+- PMOS S-pin stubs DOWN (`sdn`), never up. Detour in x before routing up to supply rail.
+- Power/GND rails use one horizontal bus wire + one flag per rail. No per-component flags.
+- Isolated ground domains get separate bus wires with a gap — never connected.
+- No `.options gmin` / `.options abstol` by default.
 
-Save to `OUTPUT/SCH/<circuit_name>.cir`, where `<circuit_name>` is the source image's filename stem unless the user specified otherwise. Keep the name slug-safe (ASCII, no spaces, only `_` or `-` as separators). Create `OUTPUT/SCH/` if it doesn't exist.
+Run gen_asc.py to produce `OUTPUT/SCH/<circuit_name>.asc`. Create `OUTPUT/SCH/` if it doesn't exist.
 
-Then **lint the file** with `scripts/lint_cir.py`. If the linter complains (missing `.end`, unicode in values, dangling nets, undefined `.model` references), fix it before handing off.
+**When the user explicitly requests a plain netlist instead**, use `scripts/write_cir.py` and produce `OUTPUT/SCH/<circuit_name>.cir`, then lint with `scripts/lint_cir.py`.
 
 ### Step 5 — Share and launch
 
@@ -129,7 +133,7 @@ These rules exist because they're where this skill fails in practice. Break them
 - **Never invent part numbers.** If an IC's markings are unreadable, ask. Substituting a "plausible" chip will produce a simulation of a different circuit.
 - **Never silently correct topology.** If the image shows op-amp inputs wired backwards, electrolytic reversed, or feedback missing, surface it as a question. The user may have drawn it wrong, or you may have read it wrong — let them decide.
 - **Comment the netlist liberally.** Every section labeled, every assumption restated in a `*` comment, every model source credited.
-- **Prefer library references over embedded models.** Run `scripts/query_lib.py` for every semiconductor before writing a `.model` card. If the part is in lib.zip, reference it by name — do not duplicate it inline. Only embed a `.model` or `.subckt` if `query_lib.py` exits 1 (not found).
+- **Prefer library references over embedded models.** Run `scripts/query_lib.py` for every semiconductor before writing a `.model` card. If the part is in lib.zip, reference it by name — do not duplicate it inline. Only move to internet search, library alternatives, or hand-crafted models when `query_lib.py` exits 1 (not found) and each subsequent tier is exhausted in order.
 
 ## Generating `.asc` schematic files
 
@@ -168,18 +172,51 @@ Do not add `.options gmin` or `.options abstol` by default. These can break simu
 that run correctly without them. Add only when a simulation actually fails and the
 user explicitly requests convergence tuning.
 
+### Label placement — wire-priority rule
+
+**Wires always have higher priority than text.** Every label, designator, and value
+must be placed so it does not overlap any wire segment.
+
+`gen_asc.py` implements this automatically via the wire registry and `_safe_window()`:
+
+1. Every `wire()` call registers the segment in `_wires[]`.
+2. `sym()` looks up WINDOW overrides from `_WINDOWS` for the symbol stem + rotation.
+3. `_safe_window(sx, sy, dx, dy)` shifts `dy` in ±`LABEL_CLEARANCE` (16 px) steps
+   until `_wire_clearance(sx+dx, sy+dy) ≥ 16`. Falls back to the original offset
+   if no clear position is found within 5 steps.
+4. The adjusted `WINDOW <n> dx dy Left 2` line is emitted **before** `SYMATTR` in the
+   SYMBOL block — LTspice requires this ordering.
+
+**Informational net labels** use `INFO_OFFSET = 32 px` stubs so the flag text
+(~16 px tall) clears the wire by at least one full grid unit.
+
+Per-component default WINDOW offsets (screen-space, verified against wires):
+
+| Symbol | Rotation | WINDOW 0 (InstName) | WINDOW 3 (Value) |
+|---|---|---|---|
+| `res` | R0 | (36, 24) | (36, 64) |
+| `res` | R270 | (56, −52) | (56, 16) |
+| `cap` | R0 | (36, −8) | (36, 56) |
+| `diode` | R0 | (36, −8) | (36, 56) |
+| `npn`, `pmos`, `voltage`, `PC817x` | — | (use .asy defaults) | (use .asy defaults) |
+
+See `references/asc_generation_rules.md §9` for the full specification, including
+body bounding boxes, the `_wire_clearance()` algorithm, and flag-stub sizing rationale.
+
 See `references/asc_generation_rules.md` for the full ruleset, the per-component stub
 direction table, and the validation checklist.
 
 ## Bundled assets
 
-- `scripts/query_lib.py` — **Run this first for every semiconductor before writing any `.model` card.** Searches the LTspice `lib.zip` for a part by name and reports: symbol path (for `.asc`), subcircuit name and call syntax (for `.cir`), and the exact `.model` line to embed if the part is absent. Exit 0 = found in library; exit 1 = not found, embed required.
-- `references/ltspice_builtin_parts.md` — Summary of what's in the LTspice library, indexed by category. Reflects LTspice 26 `lib.zip` reality. The old `standard.bjt` / `standard.mos` are gone — verify with `query_lib.py` rather than assuming a part name works.
-- `references/spice_syntax_cheatsheet.md` — Device card syntax, engineering notation, valid analysis directives, common mistakes. Skim this when writing a netlist by hand.
-- `references/circuit_templates.md` — Canonical SPICE patterns for common topologies (op-amp inverting/non-inverting, RC/RLC filters, BJT CE amplifier, 555 astable, buck converter, diode bridge). Use as scaffolds when the vision pass clearly identifies one of these topologies — not blind copies, but starting points.
-- `scripts/write_cir.py` — Helper that takes a structured Python dict describing components, nets, sources, and the analysis directive, and writes a linter-clean `.cir` file. Use this in preference to formatting strings by hand; it enforces the conventions above.
-- `scripts/lint_cir.py` — Sanity-checks a `.cir` before handoff. Verifies every node appears on ≥ 2 components, no dangling pins, no unicode in values, every `.model`/`.subckt` referenced is defined, file ends with `.end`. Run this after every netlist you emit.
-- `scripts/launch_ltspice.py` — Windows auto-launcher. Walks the detection order above and invokes LTspice with the netlist path as argument.
+- `scripts/gen_asc.py` — **Primary schematic generator.** Produces a `.asc` file for LTspice from hardcoded component placement and routing logic. Encodes pin geometry, stub/bus rules, and SPICE directives. Extend this script when adding new circuits; follow `references/asc_generation_rules.md` for all placement and routing decisions.
+- `scripts/query_lib.py` — **Run this first for every semiconductor before writing any model reference.** Searches the LTspice `lib.zip` for a part by name and reports: symbol path (for `.asc`), subcircuit name and call syntax, and the exact `.model` line to embed if absent. Exit 0 = found; exit 1 = not found, move to Tier 4+.
+- `references/asc_generation_rules.md` — Full ruleset for `.asc` generation: stub direction per component/pin/rotation, body-clearance priority, symbol placement math, bus-wire preference, PMOS S-pin detour pattern, validation checklist, and session learnings with root causes.
+- `references/ltspice_builtin_parts.md` — Summary of what's in the LTspice library, indexed by category. Reflects LTspice 26 `lib.zip` reality. Verify with `query_lib.py` rather than assuming a part name works.
+- `references/spice_syntax_cheatsheet.md` — Device card syntax, engineering notation, valid analysis directives, common mistakes.
+- `references/circuit_templates.md` — Canonical SPICE patterns for common topologies. Use as scaffolds, not blind copies.
+- `scripts/write_cir.py` — Fallback `.cir` netlist writer (used only when user explicitly requests a plain netlist).
+- `scripts/lint_cir.py` — Sanity-checks a `.cir` before handoff. Run after every `.cir` emitted.
+- `scripts/launch_ltspice.py` — Windows auto-launcher. Walks the detection order and invokes LTspice with the `.asc` (or `.cir`) path as argument.
 
 ## Failure modes
 
@@ -189,7 +226,7 @@ direction table, and the validation checklist.
 | LTspice not installed on a Windows machine | Link the user to https://www.analog.com/en/resources/design-tools-and-calculators/ltspice-simulator.html and provide the `.cir` file path. |
 | Non-Windows OS | Skip auto-launch; deliver the `.cir` with a note on how to open it. |
 | Simulation fails to converge on first run | First try: soften source edges (`Trise`/`Tfall`), reduce `maxstep`. If still failing, try `reltol=0.01` before touching `gmin`/`abstol`. Only add `gmin`/`abstol` as a last resort — they can break circuits with subcircuit-based models (optocouplers, regulators) that run correctly at defaults. Comment every option added and why. |
-| Unrecognized IC | Emit a `.subckt` stub with pin names, comment clearly that the user must supply a vendor model. Proceed with the rest of the netlist. |
+| Unrecognized IC | Follow the Tier 4 → 5 → 6 → 7 ladder: search the internet for a vendor SPICE model first; if not found, substitute a close lib.zip alternative; if no alternative exists, search the internet for an equivalent part model; only as a last resort hand-craft a `.subckt` stub from datasheet parameters with a clear `* CUSTOM MODEL:` comment. Never just drop a stub and leave the user to fill it in while other options remain. |
 | User can't answer the readback questions | Do not emit SPICE on a coin flip. Offer to proceed with explicit assumptions only if the user says so in writing. |
 | LTspice warns "floating node" on a custom subcircuit | You used `Vsense N_K K 0` + `F1` (CCCS) to sense LED current. Node `N_K` has no DC path. Replace with `Rsense N_K K 1m` + `G1 C E N_K K <Gm>` (VCCS, where Gm = CTR/Rsense). See cheatsheet gotcha #7. |
 | High-impedance output node undefined at `.op` or transient start | Add a dummy load to ground (`RLOAD OUT GND 1Meg`) so the node has a DC path when the driving switch is off. Note the resistor in a comment so the user knows it is not on the physical schematic. |
