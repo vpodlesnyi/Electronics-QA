@@ -15,6 +15,7 @@ The goal is not to replace engineering judgment, but to help engineers identify 
 | Module | Status |
 |---|---|
 | BOM QA | ✅ Available |
+| LTspice Simulation | ✅ Available |
 | CLI (`eqa`) | 🔧 In development |
 | Schematic review | 📋 Planned |
 
@@ -176,19 +177,121 @@ Each run creates a new timestamped file — previous reports are never overwritt
 
 ---
 
+## Module: LTspice Simulation
+
+Converts a schematic image into a runnable LTspice simulation — reading components and connectivity from the picture, choosing appropriate models from the LTspice library, generating a `.asc` schematic file, and launching LTspice automatically on Windows.
+
+### How it works
+
+When you trigger the skill, Claude runs a structured five-step process:
+
+1. **Vision read** — Opens the schematic image and catalogues every component (reference designator, value, part number), every net, and every source. Transistor pinouts, op-amp polarities, diode orientations, and electrolytic polarity markings are all resolved at this stage.
+2. **Readback and confirmation** — Before writing any SPICE, Claude presents a complete component table and net list derived from the image, flags every assumption it made, and asks you to confirm or correct. This is the most important step: vision models can misread values or connections, and a two-minute confirmation prevents a half-hour of debugging a phantom circuit.
+3. **Library lookup** — For every semiconductor and IC, Claude searches the LTspice `lib.zip` for a matching model. It follows a strict priority ladder: exact library subcircuit → exact library model → library symbol with embedded subcircuit → internet vendor model → library substitute → internet substitute → hand-crafted model as a last resort. The goal is always to use a validated model rather than a hand-written approximation.
+4. **Schematic generation** — Claude writes a `gen_asc_<circuit>.py` script and runs it to produce a properly-routed `.asc` schematic file. Every pin gets a 48 px stub, power rails use physical bus wires with a single flag per rail, labels are placed to avoid overlapping wires, and SPICE directives (`.tran`, `.ac`, `.op`, etc.) are chosen to match the circuit topology.
+5. **Launch** — On Windows, LTspice is launched automatically with the generated schematic loaded and ready to run.
+
+### What analysis it selects
+
+Claude infers the best analysis directive from the circuit topology:
+
+| Topology | Directive chosen |
+|---|---|
+| Pure DC bias, no reactive elements | `.op` |
+| Amplifier with AC source, gain/bandwidth question | `.ac dec 100 1 10Meg` + `.op` |
+| Oscillator, switching converter, pulse/PWM circuit | `.tran` — stop time scaled to ~10 periods |
+| Passive filter | `.ac` with limits derived from component values |
+| Digital input/output circuit with pulse source | `.tran` — stop time shows several switch cycles |
+
+### Requirements
+
+- [LTspice](https://www.analog.com/en/resources/design-tools-and-calculators/ltspice-simulator.html) installed on Windows (the modern ADI build, 2023 or later, is recommended)
+- Python 3.8 or later (used by the schematic generation scripts)
+
+LTspice is free. The skill auto-detects the standard installation paths; no manual configuration is needed.
+
+### How to run
+
+**Step 1 — Place your schematic image in the input folder:**
+```
+INPUT/SCH/your-schematic.png
+```
+Supported formats: `.png`, `.jpg`, `.jpeg`, `.bmp`
+
+The image can be a screenshot from KiCad, Altium, or EasyEDA; a photo of a hand-drawn sketch; or an image pulled from a datasheet. Higher resolution gives better results — if component values are hard to read, use a zoomed-in export.
+
+**Step 2 — Start Claude Code (if not already running):**
+```bash
+claude
+```
+
+**Step 3 — Trigger the skill** by typing any of these:
+```
+simulate this circuit
+```
+```
+run ltspice simulation
+```
+```
+make a spice netlist from this schematic
+```
+
+Or simply drop an image in the chat and describe what you want to learn from the simulation.
+
+**Step 4 — Confirm the readback.** Claude will describe everything it sees in the image — components, values, net connections, sources — and list every assumption it made. Read through the list and correct anything that is wrong before saying "yes" or "confirmed". Common things to check:
+
+- Resistor values (especially when reading from color bands or small text)
+- Transistor pinout (which leg is collector vs. emitter in a BJT)
+- Diode orientation (anode vs. cathode)
+- Capacitor polarity for electrolytics
+- Which op-amp input is `+` vs. `−`
+
+**Step 5 — Get your schematic and simulation.** When the readback is confirmed, Claude generates:
+
+```
+OUTPUT/SCH/your-schematic.asc   ← LTspice schematic, opens directly in LTspice
+scripts/gen_asc_<circuit>.py    ← reproducible script that regenerates the .asc
+```
+
+On Windows, LTspice opens automatically with the schematic loaded. Press **F9** (or click Run) to start the simulation. Probe the labeled nodes — Claude will tell you which nodes to watch and what the waveforms should look like.
+
+### Model substitution policy
+
+Claude always searches the LTspice library before writing any model from scratch. When an exact match is not found, it substitutes the closest available model and leaves a clearly labeled comment in the schematic:
+
+```
+; BC548 -> BC547B  (Tier 2 standard.bjt, same family, 45V/100mA)
+; HCPL-817-300E -> PC817D  (Tier 1 lib/sub/PC817.sub, CTR grade via Igain=3.4m)
+```
+
+Substitutions are always flagged — you will never get a silently wrong model.
+
+### Dummy load note
+
+Some circuit topologies (high-side switches, open-collector outputs) leave a node floating when the driving device is off. Claude adds a 1 MΩ dummy load resistor to these nodes so LTspice has a DC path and does not produce a convergence error. These resistors are clearly commented as not being on the physical schematic.
+
+---
+
 ## Folder structure
 
 ```
 .
 ├── .claude/
 │   └── skills/
-│       └── bom-qa/
-│           └── SKILL.md      ← BOM QA skill definition
+│       ├── bom-qa/
+│       │   └── SKILL.md            ← BOM QA skill definition
+│       └── ltspice-simulation/
+│           ├── SKILL.md            ← LTspice simulation skill definition
+│           └── references/         ← SPICE syntax, ASC rules, circuit templates
 ├── INPUT/
-│   └── BOM/                  ← place your BOM files here before running
+│   ├── BOM/                        ← place your BOM files here before running
+│   └── SCH/                        ← place your schematic images here before simulating
 ├── OUTPUT/
-│   └── BOM/                  ← reports are saved here automatically (git-ignored)
-├── .mcp.json                 ← MCP plugin configuration (loaded automatically by Claude Code)
+│   ├── BOM/                        ← BOM reports saved here automatically (git-ignored)
+│   └── SCH/                        ← generated .asc schematics saved here (git-ignored)
+├── scripts/
+│   └── gen_asc_<circuit>.py        ← reproducible script for each generated schematic
+├── .mcp.json                       ← MCP plugin configuration (loaded automatically by Claude Code)
 ├── .gitignore
 └── README.md
 ```
