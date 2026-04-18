@@ -15,7 +15,8 @@
       "mcp__pcbparts__digikey_get_part",
       "mcp__pcbparts__jlc_search",
       "Bash(git:*)",
-      "Bash(start *)"
+      "Bash(start *)",
+      "Bash(\"C:\\\\Users\\\\emuni\\\\AppData\\\\Local\\\\Programs\\\\ADI\\\\LTspice\\\\LTspice.exe\" \"C:\\\\Users\\\\emuni\\\\Documents\\\\electronics-qa\\\\OUTPUT\\\\SCH\\\\Optocoupler_Digital_Input.asc\")"
     ]
   },
   "enableAllProjectMcpServers": true,

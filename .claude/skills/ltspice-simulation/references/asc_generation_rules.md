@@ -304,7 +304,11 @@ def _wire_clearance(px, py):
 
 - [ ] No wire goes from a pin toward the component's own body interior
 - [ ] No routing wire passes through any component symbol body
-- [ ] PMOS S-pin routes downward, not upward
+- [ ] PMOS S-pin routes downward (`sdn`), never upward
+- [ ] No U-shaped supply routes — use net label flag instead
+- [ ] Minimum component body gap ≥ 8 grid units (128 px); target 10–14 in dense areas
+- [ ] Parallel GND/supply wires spaced ≥ 10 grid units (160 px) apart
+- [ ] Component pins land directly on signal wires where possible — no branch stubs
 - [ ] All stubs are strictly horizontal or vertical
 - [ ] All coordinates are multiples of 16 (grid-aligned)
 - [ ] Symbol origin is derived from pin-landing math, not hardcoded guesses
@@ -359,3 +363,24 @@ but failed with them. `gmin=1e-10` perturbed the PC817 internal node equations.
 
 **Rule extracted:** Never add `.options gmin`/`abstol` by default. Add only when
 simulation actually fails and the user requests convergence tuning.
+
+### Output domain mess: C2/VD1 overlap, VT2 U-route (fixed 2026-04)
+**Problem:** Three root causes in the output domain (MVT2, RLOAD, DVD1, C2):
+1. VT2 source stub went DOWN to y=464, then routed RIGHT to x=2368, then all the way UP
+   to PWR24B at y=80 — a U-shaped route that ran back through the component area.
+2. C2 (SX=2528, body x=2528-2560) and VD1 (SX=2560, body x=2560-2592) shared x=2560 — literal body overlap.
+3. Three GND wires at x=2432, 2544, 2576 — only 32 px apart between the closest pair.
+4. RLOAD pA was not on the DOUTA wire; a branch wire (2432,272)→(2432,288) was needed.
+
+**Fix:**
+- VT2 source: `sdn(*pS_vt2)` (correct, exits body) then `flag(*sS_vt2, "PWR24B")`. No U-route.
+- RLOAD: set `SY_RL = DOUTA_Y - RES_A[1]` → pA lands directly on DOUTA wire at y=272. No branch wire.
+- VD1: set `SY_VD1 = DOUTA_Y` → pP lands directly on DOUTA wire at y=272. No branch wire.
+- Spacing: RLOAD at +14 grid from VT2 D; VD1 at +12 grid from RLOAD; C2 at +11 grid from VD1.
+- GND wires now at x=2528, 2720, 2896 — 192 px and 176 px apart (12+ grid units each).
+
+**Rules extracted:**
+- **Minimum body gap: 8 grid units (128 px).** Target 10–14 for output domain readability.
+- **U-routes forbidden.** If a supply pin must connect upward but faces a routing conflict, use a net label flag at the stub end (`flag(*stub_end, "RAIL_NAME")`).
+- **Land component pins directly on signal wires.** For a vertical R0 resistor with pA at signal wire y=W: `SY = W - RES_A[1]`. For a R0 diode anode at y=W: `SY = W`. Eliminates branch wires.
+- **Space parallel GND/supply wires ≥ 10 grid units (160 px) apart.**

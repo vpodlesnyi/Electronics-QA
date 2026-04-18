@@ -13,6 +13,13 @@ Bus rule:
 
 H    = 2  : horizontal scale factor
 STUB = 48 : 3 × 16-px grid units of clearance per pin
+
+Library lookups (query_lib.py results):
+  BC846ALT1G  → BC846B  in standard.bjt  (Tier 2: same die, alt package)
+  HCPL-817-300E → PC817D in lib/sub/PC817.sub (Tier 5: same die, CTR grade via Igain=3.4m)
+  FQD11P06TM  → FQB11P06 VDMOS(pchan) in standard.mos (Tier 5: same die, alt package, 60V 11A)
+  SMBJ24CA    → SMBJ24CA in standard.dio  (Tier 2: direct match)
+  FYLS-0603UBC → NSPW500BS (Nichia white 30mA, Vf≈3.1V@10mA, Tier 2 standard.dio; color irrelevant, Vf match chosen)
 """
 from __future__ import annotations
 import pathlib
@@ -49,6 +56,7 @@ def emit(*a): lines.append(" ".join(str(x) for x in a))
 def wire(x1,y1,x2,y2): emit("WIRE",x1,y1,x2,y2)
 def flag(x,y,n):        emit(f"FLAG {x} {y} {n}")
 def text(x,y,s):        emit(f"TEXT {x} {y} Left 2 !{s}")
+def comment(x,y,s):     emit(f"TEXT {x} {y} Left 2 ;{s}")
 def sym(name,sx,sy,r,inst,val,val2=None,extra=None):
     emit(f"SYMBOL {name} {sx} {sy} {r}")
     emit(f"SYMATTR InstName {inst}")
@@ -73,7 +81,7 @@ Y_LED_A  = 400   # N_LED_A signal bus
 # Y_LED_K derived from R5 body (80 px) + two STUB clearances
 Y_LED_K  = Y_LED_A + STUB + (RES_B[1]-RES_A[1]) + STUB   # 400+48+80+48 = 576
 Y_GND    = 960   # GND / node-0 bus (input domain)
-Y_GNDO   = 960   # GND_OUT bus (isolated output domain, same y, no shared wire)
+Y_GNDO   = 960   # GND_OUT bus — same node as GND (grounds connected per simulation request)
 
 # ============================================================
 # INPUT DOMAIN  (GND / 5 V)
@@ -98,11 +106,11 @@ flag(*sup(*pP_din), "DINA")             # keep net label — R1-A is far away at
 sN_din = sdn(*pN_din)                   # (576, 608)
 wire(*sN_din, sN_din[0], Y_GND)         # route down to GND bus  (576,608)→(576,960)
 
-# ── HL1 : blue LED ────────────────────────────────────────────
+# ── HL1 : blue LED (FYLS-0603UBC → NSPW500BS, Nichia white Iave=30mA, Vf≈3.1V@10mA, Tier 2 standard.dio) ──
 SX_HL1, SY_HL1 = 160*H, 80
 pP_hl1 = pin(SX_HL1, SY_HL1, *DIO_P)   # (336, 80)
 pN_hl1 = pin(SX_HL1, SY_HL1, *DIO_N)   # (336, 144)
-sym("diode", SX_HL1, SY_HL1, "R0", "DHL1", "BLUELED")
+sym("diode", SX_HL1, SY_HL1, "R0", "DHL1", "NSPW500BS")
 sP_hl1 = sup(*pP_hl1)                   # (336, 32) — stub end lands on Y_PWR5B ✓
 sN_hl1 = sdn(*pN_hl1)                   # (336, 192)
 wire(*sN_hl1, sN_hl1[0], Y_LED_A)       # drop to N_LED_A bus  (336,192)→(336,400)
@@ -140,7 +148,7 @@ sup(*pA_c1)                   # (1456, 400) on N_LED_A bus ✓
 sB_c1 = sdn(*pB_c1)           # (1456, 560)
 wire(*sB_c1, sB_c1[0], Y_LED_K)   # route 560→576 to N_LED_K bus
 
-# ── DA1 : PC817D ──────────────────────────────────────────────
+# ── DA1 : PC817D  (SUBSTITUTE: HCPL-817-300E → PC817D, same die, CTR via Igain=3.4m) ──
 SX_DA1, SY_DA1 = 944*H, 448
 pA_da1 = pin(SX_DA1, SY_DA1, *PC817_A)   # (1792, 400)
 pK_da1 = pin(SX_DA1, SY_DA1, *PC817_K)   # (1792, 496)
@@ -153,7 +161,7 @@ sK_da1 = sleft(*pK_da1)   # (1744, 496)
 wire(*sK_da1, sK_da1[0], Y_LED_K)   # route 496→576 to N_LED_K bus
 sC_da1 = sright(*pC_da1)  # (2032, 400) = N_OPT_C node
 sE_da1 = sdn(*pE_da1)     # (1984, 544)
-wire(*sE_da1, sE_da1[0], Y_GNDO)   # route down to GND_OUT bus
+wire(*sE_da1, sE_da1[0], Y_GNDO)   # route down to GND_OUT bus (= node 0)
 
 N_OPT_C_X, N_OPT_C_Y = sC_da1   # (2032, 400)
 
@@ -172,14 +180,14 @@ sym("res", SX_R4, SY_R4, "R0", "R4", "18")
 sup(*pA_r4)              # (1232, 576) = N_LED_K bus ✓
 sB_r4 = sdn(*pB_r4)     # (1232, 752) = N_COLL node
 
-# ── QVT1 : NPN BC547B ────────────────────────────────────────
+# ── QVT1 : NPN BC846B  (SUBSTITUTE: BC846ALT1G → BC846B, same die, Tier 2 lib.zip) ──
 # Collector stub ↑ must reach N_COLL = sB_r4 = (1232, 752)
 SX_Q = N_LED_K_X - NPN_C[0]    # 1232-64 = 1168
 SY_Q = sB_r4[1] + STUB          # 752+48 = 800
 pC_q = pin(SX_Q, SY_Q, *NPN_C)   # (1232, 800)
 pB_q = pin(SX_Q, SY_Q, *NPN_B)   # (1168, 848)
 pE_q = pin(SX_Q, SY_Q, *NPN_E)   # (1232, 896)
-sym("npn", SX_Q, SY_Q, "R0", "QVT1", "BC547B")
+sym("npn", SX_Q, SY_Q, "R0", "QVT1", "BC846B")
 sup(*pC_q)               # (1232, 752) = N_COLL ✓  (meets sB_r4)
 sB_q  = sleft(*pB_q)     # (1120, 848) = N_BASE node
 sE_q  = sdn(*pE_q)       # (1232, 944)
@@ -214,7 +222,7 @@ sright(*pB_r1)                 # (1120, 848) = N_BASE ✓
 flag(N_BASE_X, N_BASE_Y, "N_BASE")
 
 # ============================================================
-# OUTPUT DOMAIN  (GND_OUT / 24 V)
+# OUTPUT DOMAIN  (GND / 24 V — grounds connected to node 0)
 # ============================================================
 
 # ── R6 : 100 Ω horizontal (N_OPT_C → N_GATE) ────────────────
@@ -240,44 +248,56 @@ sA_r7 = sup(*pA_r7)                    # (2208, 224)
 wire(*sA_r7, sA_r7[0], Y_PWR24B)      # route up to PWR24B bus  (2208,224)→(2208,80)
 sdn(*pB_r7)                            # (2208, 400) = N_GATE ✓
 
-# ── VT2 : IRF9540 P-ch MOSFET ────────────────────────────────
-# Gate stub ← must reach N_GATE; pG = (SX_VT2, SY_VT2+80)
-SX_VT2 = N_GATE_X + STUB               # 2208+48 = 2256
+# ── VT2 : FQB11P06 P-ch MOSFET (SUBSTITUTE: FQD11P06TM → FQB11P06, same die, Tier 3 lib.zip) ──
+# SX_VT2 = N_GATE_X + 80 (5 grid) — keeps 4-grid body gap from R7 right edge (~2224)
+SX_VT2 = N_GATE_X + 80                 # 2208+80 = 2288  (R7 right ~2224, gap=64px=4 grid ✓)
 SY_VT2 = N_GATE_Y - PMOS_G[1]          # 400-80 = 320
-pD_vt2 = pin(SX_VT2, SY_VT2, *PMOS_D)   # (2304, 320)
-pG_vt2 = pin(SX_VT2, SY_VT2, *PMOS_G)   # (2256, 400)
-pS_vt2 = pin(SX_VT2, SY_VT2, *PMOS_S)   # (2304, 416)
-sym("pmos", SX_VT2, SY_VT2, "R0", "MVT2", "IRF9540")
-sleft(*pG_vt2)              # (2208, 400) = N_GATE ✓
-sD_vt2 = sup(*pD_vt2)       # (2304, 272) = DOUTA node  (exits above body ✓)
-sS_vt2 = sdn(*pS_vt2)       # (2304, 464) — stub DOWN, exits below body ✓
-# Route right to x=2368 (clear of VT2 body and RLOAD), then up to PWR24B
-VT2S_X = 2368
-wire(*sS_vt2, VT2S_X, sS_vt2[1])       # (2304,464)→(2368,464) horizontal
-wire(VT2S_X, sS_vt2[1], VT2S_X, Y_PWR24B)  # (2368,464)→(2368,80) vertical to bus
+pD_vt2 = pin(SX_VT2, SY_VT2, *PMOS_D)   # (2336, 320)
+pG_vt2 = pin(SX_VT2, SY_VT2, *PMOS_G)   # (2288, 400)
+pS_vt2 = pin(SX_VT2, SY_VT2, *PMOS_S)   # (2336, 416)
+sym("pmos", SX_VT2, SY_VT2, "R0", "MVT2", "FQB11P06")
+wire(*pG_vt2, N_GATE_X, N_GATE_Y)      # (2288,400)→(2208,400) = N_GATE (80px = 5-grid stub ✓)
+sD_vt2 = sup(*pD_vt2)       # (2336, 272) = DOUTA node  (exits above body ✓)
+sS_vt2 = sdn(*pS_vt2)       # (2336, 464) — stub DOWN exits body ✓
+flag(*sS_vt2, "PWR24B")     # source = +24V via net label; avoids U-shaped cross-domain route
+
+# ── RLOAD : 1 MΩ dummy load (not on physical schematic — provides DC path when VT2 off) ──
+# Hangs 4 grid (64px) BELOW DOUTA bus (y=272+64=336). Clean vertical drop — no dangling stub.
+# Spacing from VT2 D stub (x=2336): 192 px = 12 grid ✓
+SX_RL = 2512                          # pA at x=2528, 12 grid right of VT2 D
+SY_RL = 320                           # pA at y=336 — 4 grid below DOUTA ✓
+pA_rl = pin(SX_RL, SY_RL, *RES_A)   # (2528, 336)
+pB_rl = pin(SX_RL, SY_RL, *RES_B)   # (2528, 416)
+sym("res", SX_RL, SY_RL, "R0", "RLOAD", "1Meg")
+wire(pA_rl[0], sD_vt2[1], *pA_rl)    # (2528,272)→(2528,336) clean drop; no dangling stub
+sB_rl_dn = sdn(*pB_rl)               # (2528, 464)
+wire(*sB_rl_dn, sB_rl_dn[0], Y_GNDO) # route down to GND bus
+
+# ── VD1 : SMBJ24CA bidirectional TVS (direct lib.zip Tier 2 match, standard.dio) ──
+# Hangs 4 grid (64px) BELOW DOUTA bus (y=272+64=336). Clean vertical drop — no dangling stub.
+# Spacing from RLOAD pA (x=2528): 192 px = 12 grid ✓
+SX_VD1 = 2704                         # pP at x=2720, 12 grid right of RLOAD
+SY_VD1 = 336                          # pP at y=336 — 4 grid below DOUTA ✓
+pP_vd1 = pin(SX_VD1, SY_VD1, *DIO_P) # (2720, 336)
+pN_vd1 = pin(SX_VD1, SY_VD1, *DIO_N) # (2720, 400)
+sym("diode", SX_VD1, SY_VD1, "R0", "DVD1", "SMBJ24CA")
+wire(pP_vd1[0], sD_vt2[1], *pP_vd1)  # (2720,272)→(2720,336) clean drop; no dangling stub
+sN_vd1 = sdn(*pN_vd1)    # (2720, 448)
+wire(*sN_vd1, sN_vd1[0], Y_GNDO)   # route down to GND bus
 
 # ── C2 : 100 nF decoupling ────────────────────────────────────
-SX_C2 = 1264*H   # 2528
+# Spacing from VD1 (x=2720): 176 px = 11 grid units ✓
+SX_C2 = 2880
 SY_C2 = 200
-pA_c2 = pin(SX_C2, SY_C2, *CAP_A)   # (2544, 200)
-pB_c2 = pin(SX_C2, SY_C2, *CAP_B)   # (2544, 264)
+pA_c2 = pin(SX_C2, SY_C2, *CAP_A)   # (2896, 200)
+pB_c2 = pin(SX_C2, SY_C2, *CAP_B)   # (2896, 264)
 sym("cap", SX_C2, SY_C2, "R0", "C2", "100n")
-sA_c2 = sup(*pA_c2)                   # (2544, 152)
-wire(*sA_c2, sA_c2[0], Y_PWR24B)     # route up to PWR24B bus  (2544,152)→(2544,80)
-sB_c2_dn = sdn(*pB_c2)               # (2544, 312)
-wire(*sB_c2_dn, sB_c2_dn[0], Y_GNDO) # route down to GND_OUT bus
+sA_c2 = sup(*pA_c2)                   # (2896, 152)
+wire(*sA_c2, sA_c2[0], Y_PWR24B)     # route up to PWR24B bus  (2896,152)→(2896,80)
+sB_c2_dn = sdn(*pB_c2)               # (2896, 312)
+wire(*sB_c2_dn, sB_c2_dn[0], Y_GNDO) # route down to GND bus
 
-# ── RLOAD : 1 MΩ dummy load ──────────────────────────────────
-SX_RL = SX_VT2 + 160    # 2416
-SY_RL = SY_VT2          # 320
-pA_rl = pin(SX_RL, SY_RL, *RES_A)   # (2432, 336)
-pB_rl = pin(SX_RL, SY_RL, *RES_B)   # (2432, 416)
-sym("res", SX_RL, SY_RL, "R0", "RLOAD", "1Meg")
-sA_rl    = sup(*pA_rl)               # (2432, 288) = DOUTA
-sB_rl_dn = sdn(*pB_rl)              # (2432, 464)
-wire(*sB_rl_dn, sB_rl_dn[0], Y_GNDO) # route down to GND_OUT bus
-
-# ── V24 : 24 V isolated supply ────────────────────────────────
+# ── V24 : 24 V supply ────────────────────────────────────────
 SX_V24, SY_V24 = 1648*H, 464
 pP_v24 = pin(SX_V24, SY_V24, *VOL_P)   # (3296, 480)
 pN_v24 = pin(SX_V24, SY_V24, *VOL_N)   # (3296, 560)
@@ -285,7 +305,7 @@ sym("voltage", SX_V24, SY_V24, "R0", "V24", "DC 24")
 sP_v24    = sup(*pP_v24)                # (3296, 432)
 wire(*sP_v24, sP_v24[0], Y_PWR24B)     # route up to PWR24B bus  (3296,432)→(3296,80)
 sN_v24_dn = sdn(*pN_v24)               # (3296, 608)
-wire(*sN_v24_dn, sN_v24_dn[0], Y_GNDO) # route down to GND_OUT bus
+wire(*sN_v24_dn, sN_v24_dn[0], Y_GNDO) # route down to GND bus (node 0)
 
 # ============================================================
 # PHYSICAL BUSES
@@ -299,18 +319,19 @@ flag(sP_v5b[0], Y_PWR5B, "PWR5B")
 wire(sN_v5b[0], Y_GND, sE_q[0], Y_GND)   # (160,960)→(1232,960)
 flag(sN_v5b[0], Y_GND, "0")
 
-# PWR24B bus — output domain: R7-A to V24+  (VT2-S at 2352, C2-A at 2544 in between)
+# PWR24B bus — output domain: R7-A to V24+  (C2-A at 2896 in between)
+# VT2 source connects via "PWR24B" net label flag — no physical bus tap needed there
 wire(sA_r7[0], Y_PWR24B, sP_v24[0], Y_PWR24B)   # (2208,80)→(3296,80)
 flag(sP_v24[0], Y_PWR24B, "PWR24B")
 
-# GND_OUT bus — isolated domain: DA1-E to V24-  (RLOAD-B, C2-B in between)
+# GND bus — output domain (node 0, same net as input GND): DA1-E to V24-
 wire(sE_da1[0], Y_GNDO, sN_v24_dn[0], Y_GNDO)   # (1984,960)→(3296,960)
-flag(sN_v24_dn[0], Y_GNDO, "GND_OUT")
+flag(sN_v24_dn[0], Y_GNDO, "0")
 
-# DOUTA: direct L-shaped wire from VT2-D stub to RLOAD-A stub
-wire(*sD_vt2, sA_rl[0], sD_vt2[1])   # (2304,272)→(2432,272)  horizontal
-wire(sA_rl[0], sD_vt2[1], *sA_rl)    # (2432,272)→(2432,288)  vertical
-flag(*sD_vt2, "DOUTA")               # net label for .save reference
+# DOUTA: horizontal from VT2-D stub to VD1 drop point
+# RLOAD (x=2528) and VD1 (x=2720) connect via clean vertical drops — T-junctions at y=272
+wire(*sD_vt2, pP_vd1[0], sD_vt2[1])   # (2336,272)→(2720,272)  horizontal
+flag(*sD_vt2, "DOUTA")
 
 # ============================================================
 # INFORMATIONAL NET LABELS
@@ -343,16 +364,14 @@ DX, DY = 96, 1040
 text(DX, DY,      ".tran 0 5m 0 1u")
 text(DX, DY+24,   ".op")
 text(DX, DY+48,
-    ".model IRF9540 PMOS(Level=3 Gamma=0 Delta=0 Eta=0 Theta=0"
-    " Kappa=0.2 Vmax=0 Xj=0 Tox=97.5n Uo=157 Phi=0.6 Rs=0.7017m"
-    " Kp=10.15u W=0.35 L=2u Vto=-3.93 Rd=0.3571 Rds=1.667Meg"
-    " Cbd=3.229n Pb=0.8 Mj=0.5 Fc=0.5 Cgso=9.027e-9"
-    " Cgdo=2.071e-10 Is=0.3456p N=1 Tt=880n)")
-text(DX, DY+72,
-    ".model BLUELED D(Is=1e-28 N=1.8 Rs=3 BV=10 Vj=0.75 M=0.5 Cjo=2p)")
-text(DX, DY+96,
     ".save V(DINA) V(N_BASE) V(N_COLL) V(N_LED_A) V(N_LED_K)"
     " V(N_OPT_C) V(N_GATE) V(DOUTA)")
+comment(DX, DY+72,  "BC846ALT1G -> BC846B  (same die, Tier 2 lib.zip standard.bjt)")
+comment(DX, DY+88,  "FQD11P06TM -> FQB11P06 VDMOS(pchan) (same die, Tier 3 lib.zip standard.mos, Vds=-60V Ron=175m)")
+comment(DX, DY+104, "HCPL-817-300E -> PC817D (same die, CTR=300% via Igain=3.4m, Tier 5 lib/sub/PC817.sub)")
+comment(DX, DY+120, "FYLS-0603UBC -> NSPW500BS (Nichia white 30mA, Vf=3.1V@10mA, Tier 2 standard.dio)")
+comment(DX, DY+136, "SMBJ24CA direct match in standard.dio (Tier 2)")
+comment(DX, DY+152, "RLOAD=1Meg not on physical schematic; gives DC path to GND when VT2 is off")
 
 # ============================================================
 # WRITE OUTPUT
@@ -366,7 +385,7 @@ print("Bus levels:")
 print(f"  PWR5B   y={Y_PWR5B}   x={sP_v5b[0]}..{sP_hl1[0]}")
 print(f"  PWR24B  y={Y_PWR24B}  x={sA_r7[0]}..{sP_v24[0]}")
 print(f"  GND(0)  y={Y_GND}   x={sN_v5b[0]}..{sE_q[0]}")
-print(f"  GND_OUT y={Y_GNDO}   x={sE_da1[0]}..{sN_v24_dn[0]}")
+print(f"  GND_OUT->0 y={Y_GNDO} x={sE_da1[0]}..{sN_v24_dn[0]}")
 print()
 print("Signal nodes:")
 print(f"  N_LED_A  ({N_LED_A_X}, {N_LED_A_Y})   bus y={Y_LED_A}  x={N_HL1_X}..{sA_da1[0]}")
@@ -375,5 +394,6 @@ print(f"  N_OPT_C  ({N_OPT_C_X}, {N_OPT_C_Y})")
 print(f"  N_COLL   ({sB_r4[0]}, {sB_r4[1]})")
 print(f"  N_BASE   ({N_BASE_X}, {N_BASE_Y})")
 print(f"  N_GATE   ({N_GATE_X}, {N_GATE_Y})")
-print(f"  DOUTA    ({sD_vt2[0]}, {sD_vt2[1]}) -> ({sA_rl[0]}, {sA_rl[1]})")
+print(f"  DOUTA    ({sD_vt2[0]}, {sD_vt2[1]}) -> ({pP_vd1[0]}, {sD_vt2[1]}) [horizontal bus y={sD_vt2[1]}]")
+print(f"  VD1 pP   ({pP_vd1[0]}, {pP_vd1[1]})  pN  ({pN_vd1[0]}, {pN_vd1[1]})  [drop from y={sD_vt2[1]}]")
 print(f"  STUB = {STUB} px = {STUB//16} grid units")

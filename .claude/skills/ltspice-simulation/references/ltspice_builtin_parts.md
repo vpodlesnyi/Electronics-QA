@@ -89,6 +89,31 @@ Card syntax: `D1 anode cathode <model_name>`
 
 ---
 
+## LEDs (indicator and power)
+
+**`standard.dio` contains 41 LED models** — always search there before writing a custom model.
+**Color is irrelevant.** Pick by electrical properties: Vf at the operating current and Iave rating.
+
+Compute Vf at target current If:  `Vf ≈ N·Vt·ln(If/Is) + Rs·If`  (Vt=0.02585 V at 25 °C)
+
+Run `query_lib.py <part>` first; if not found, pick from this table:
+
+| LED type / Vf range | Best lib.zip model | Vf@10mA | Iave | Notes |
+|---|---|---|---|---|
+| Blue / white indicator ≤30 mA | **NSPW500BS** | ≈3.1 V | 30 mA | Nichia; closest Vf for blue/white |
+| White SMD indicator ≤35 mA | **NSSWS108T** | ≈3.0 V | 35 mA | Nichia SMD white |
+| Red / yellow / orange indicator | **QTLP690C** | ≈1.8 V | 160 mA | Fairchild; low Vf = red/yellow range |
+| General high-power white 350 mA | **L1C1-PCA1000000000** | ≈2.6 V | 350 mA | Lumileds |
+| High-power white 500 mA | **LXZ1-PX01** | ≈2.6 V | 500 mA | Lumileds |
+
+> **Do not write a custom BLUELED/REDLED model** until `standard.dio` is exhausted and
+> an internet vendor model search has also failed. The 41 lib.zip LED models cover nearly
+> all indicator and lighting use cases.
+
+Card syntax: `D1 anode cathode <model_name>` (same as any diode)
+
+---
+
 ## BJTs
 
 > **LTspice 26 note:** `standard.bjt` no longer exists as a loadable file.
