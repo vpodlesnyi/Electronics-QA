@@ -276,14 +276,15 @@ wire(*sB_rl_dn, sB_rl_dn[0], Y_GNDO) # route down to GND bus
 # ── VD1 : SMBJ24CA bidirectional TVS (direct lib.zip Tier 2 match, standard.dio) ──
 # Hangs 4 grid (64px) BELOW DOUTA bus (y=272+64=336). Clean vertical drop — no dangling stub.
 # Spacing from RLOAD pA (x=2528): 192 px = 12 grid ✓
-SX_VD1 = 2704                         # pP at x=2720, 12 grid right of RLOAD
-SY_VD1 = 336                          # pP at y=336 — 4 grid below DOUTA ✓
-pP_vd1 = pin(SX_VD1, SY_VD1, *DIO_P) # (2720, 336)
-pN_vd1 = pin(SX_VD1, SY_VD1, *DIO_N) # (2720, 400)
-sym("diode", SX_VD1, SY_VD1, "R0", "DVD1", "SMBJ24CA")
-wire(pP_vd1[0], sD_vt2[1], *pP_vd1)  # (2720,272)→(2720,336) clean drop; no dangling stub
-sN_vd1 = sdn(*pN_vd1)    # (2720, 448)
-wire(*sN_vd1, sN_vd1[0], Y_GNDO)   # route down to GND bus
+# R180: cathode (N, SpiceOrder2) at top → DOUTA; anode (P, SpiceOrder1) at bottom → GND_OUT
+SX_VD1 = 2736                          # pins land at x=SX-16=2720, 12 grid right of RLOAD
+SY_VD1 = 400                           # cathode at SY-64=336 (DOUTA drop); anode at SY=400
+pN_vd1 = pin(SX_VD1, SY_VD1, *DIO_N, 'R180')  # (-16,-64)→(2720,336) cathode at DOUTA ✓
+pP_vd1 = pin(SX_VD1, SY_VD1, *DIO_P, 'R180')  # (-16,  0)→(2720,400) anode at GND side ✓
+sym("diode", SX_VD1, SY_VD1, "R180", "DVD1", "SMBJ24CA")
+wire(pN_vd1[0], sD_vt2[1], *pN_vd1)   # (2720,272)→(2720,336) clean drop; cathode to DOUTA ✓
+sP_vd1 = sdn(*pP_vd1)    # (2720, 448)
+wire(*sP_vd1, sP_vd1[0], Y_GNDO)   # route down to GND bus
 
 # ── C2 : 100 nF decoupling ────────────────────────────────────
 # Spacing from VD1 (x=2720): 176 px = 11 grid units ✓
@@ -330,7 +331,7 @@ flag(sN_v24_dn[0], Y_GNDO, "0")
 
 # DOUTA: horizontal from VT2-D stub to VD1 drop point
 # RLOAD (x=2528) and VD1 (x=2720) connect via clean vertical drops — T-junctions at y=272
-wire(*sD_vt2, pP_vd1[0], sD_vt2[1])   # (2336,272)→(2720,272)  horizontal
+wire(*sD_vt2, pN_vd1[0], sD_vt2[1])   # (2336,272)→(2720,272)  horizontal
 flag(*sD_vt2, "DOUTA")
 
 # ============================================================
@@ -395,5 +396,5 @@ print(f"  N_COLL   ({sB_r4[0]}, {sB_r4[1]})")
 print(f"  N_BASE   ({N_BASE_X}, {N_BASE_Y})")
 print(f"  N_GATE   ({N_GATE_X}, {N_GATE_Y})")
 print(f"  DOUTA    ({sD_vt2[0]}, {sD_vt2[1]}) -> ({pP_vd1[0]}, {sD_vt2[1]}) [horizontal bus y={sD_vt2[1]}]")
-print(f"  VD1 pP   ({pP_vd1[0]}, {pP_vd1[1]})  pN  ({pN_vd1[0]}, {pN_vd1[1]})  [drop from y={sD_vt2[1]}]")
+print(f"  VD1 pN(K) ({pN_vd1[0]}, {pN_vd1[1]})->DOUTA  pP(A) ({pP_vd1[0]}, {pP_vd1[1]})->GND  [R180, cathode to DOUTA]")
 print(f"  STUB = {STUB} px = {STUB//16} grid units")
