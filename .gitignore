@@ -12,6 +12,13 @@ INPUT/SCH/*
 OUTPUT/SCH/*
 !OUTPUT/SCH/.gitkeep
 
+# Keep folder structure but ignore all files inside INPUT/ALTERNATIVE and OUTPUT/ALTERNATIVE
+INPUT/ALTERNATIVE/*
+!INPUT/ALTERNATIVE/.gitkeep
+
+OUTPUT/ALTERNATIVE/*
+!OUTPUT/ALTERNATIVE/.gitkeep
+
 # Dependencies
 node_modules/
 
