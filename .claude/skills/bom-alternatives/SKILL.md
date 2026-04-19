@@ -276,7 +276,7 @@ matching the reference specifications."
 
 ### 5.1 Generate the Excel Report
 
-Use the `xlsx` skill. Save to `electronics-qa/alternatives_report_YYYY-MM-DD.xlsx`.
+Use the `xlsx` skill. Save to `electronics-qa/OUTPUT/ALTERNATIVE/alternatives_report_YYYY-MM-DD.xlsx`.
 Read `references/output-format.md` for the complete sheet structure and formatting.
 
 **Sheet 1: Summary** — Date, parts analyzed, totals by tier, requirements recap,

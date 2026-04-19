@@ -3,7 +3,7 @@
 Complete specification for the alternatives report generated in Phase 5.
 Use the `xlsx` skill to create this file.
 
-**Filename:** `electronics-qa/alternatives_report_YYYY-MM-DD.xlsx`
+**Filename:** `electronics-qa/OUTPUT/ALTERNATIVE/alternatives_report_YYYY-MM-DD.xlsx`
 
 ---
 
