@@ -86,6 +86,26 @@ def classify_pin(name: str) -> tuple[str, str, int]:
     return "unknown", "", 99
 
 
+# ---------- layout constants ----------
+
+GRID        = 16   # LTspice grid unit
+MIN_STEP    = 48   # minimum coordinate spacing between adjacent pins on a side (3×GRID)
+BODY_MARGIN = 32   # padding from body corner to nearest pin on that side (2×GRID)
+CHAR_W      = 8    # approximate coordinate units per char at LTspice text size 1
+MIN_BODY_W  = 96   # minimum body width
+MIN_BODY_H  = 64   # minimum body height
+
+
+def _round_up(v: int, g: int) -> int:
+    """Round v up to the nearest multiple of g."""
+    return ((v + g - 1) // g) * g
+
+
+def _snap(v: int) -> int:
+    """Round v to the nearest GRID multiple."""
+    return round(v / GRID) * GRID
+
+
 # ---------- body geometry presets ----------
 
 @dataclass
@@ -209,20 +229,35 @@ def pmos_geom() -> BodyGeom:
     return g
 
 
-def generic_rect_geom(pin_count: int) -> BodyGeom:
-    """Body sized to fit pin count with reasonable spacing."""
-    if pin_count <= 4:
-        w, h = 64, 64
-    elif pin_count <= 6:
-        w, h = 96, 64
-    elif pin_count <= 10:
-        w, h = 96, 96
-    elif pin_count <= 16:
-        w, h = 128, 128
-    elif pin_count <= 24:
-        w, h = 160, 160
+def compute_generic_body(pins: list[dict], name: str) -> BodyGeom:
+    """Compute a rectangle body sized to readable pin spacing and name label."""
+    side_counts: dict[str, int] = {"left": 0, "right": 0, "top": 0, "bottom": 0}
+    for p in pins:
+        side = p.get("_side") or "left"
+        key = side if side in side_counts else "left"
+        side_counts[key] += 1
+
+    lr = max(side_counts["left"], side_counts["right"])
+    tb = max(side_counts["top"], side_counts["bottom"])
+
+    # Height: driven by left/right pin count.
+    # n pins need (n-1) gaps of MIN_STEP plus BODY_MARGIN on each end.
+    if lr <= 1:
+        h = 2 * BODY_MARGIN
     else:
-        w, h = 192, 192
+        h = 2 * BODY_MARGIN + (lr - 1) * MIN_STEP
+    h = max(h, MIN_BODY_H)
+    h = _round_up(h, 32)   # round to 32 so h//2 lands on 16-grid
+
+    # Width: driven by top/bottom pin count and name text width.
+    name_w = len(name) * CHAR_W + 2 * BODY_MARGIN
+    if tb <= 1:
+        w_for_tb = MIN_BODY_W
+    else:
+        w_for_tb = 2 * BODY_MARGIN + (tb - 1) * MIN_STEP
+    w = max(MIN_BODY_W, name_w, w_for_tb)
+    w = _round_up(w, 32)   # round to 32 so w//2 lands on 16-grid
+
     return BodyGeom(
         rect=(-w // 2, -h // 2, w // 2, h // 2),
         extra_lines=[],
@@ -249,8 +284,10 @@ PART_GEOMS = {
 
 def place_generic_pins(pins: list[dict[str, Any]],
                        geom: BodyGeom) -> list[dict[str, Any]]:
-    """For pins that don't have a fixed position, lay them out around the
-    perimeter of the body rectangle by detected side."""
+    """Lay out pins that lack a fixed position around the body perimeter.
+
+    Pins are centered on each side with at least MIN_STEP between them.
+    """
     x1, y1, x2, y2 = geom.rect
     placed = []
     side_buckets: dict[str, list[dict[str, Any]]] = {
@@ -263,7 +300,6 @@ def place_generic_pins(pins: list[dict[str, Any]],
         side = pin.get("_side") or "left"
         side_buckets.setdefault(side, []).append(pin)
 
-    # spread on each side
     def lay(bucket: list[dict[str, Any]], side: str) -> None:
         n = len(bucket)
         if n == 0:
@@ -271,15 +307,17 @@ def place_generic_pins(pins: list[dict[str, Any]],
         if side in ("left", "right"):
             x = x1 if side == "left" else x2
             orient = "LEFT" if side == "left" else "RIGHT"
-            # pad endpoints so labels don't sit on corners
-            span = (y2 - y1) - 32
             if n == 1:
-                ys = [(y1 + y2) // 2]
+                ys = [0]
             else:
-                step = span // (n - 1) if n > 1 else 0
-                ys = [y1 + 16 + i * step for i in range(n)]
-            # snap to 16-px grid
-            ys = [(y + 8) // 16 * 16 for y in ys]
+                # Use at least MIN_STEP; expand if body is roomier.
+                available = (y2 - y1) - 2 * BODY_MARGIN
+                step = max(MIN_STEP, available // (n - 1))
+                step = _round_up(step, GRID)
+                total = (n - 1) * step
+                y_start = -total // 2
+                ys = [y_start + i * step for i in range(n)]
+            ys = [_snap(y) for y in ys]
             for pin, y in zip(bucket, ys):
                 pin["_x"], pin["_y"] = x, y
                 pin["_orient"], pin["_offset"] = orient, 8
@@ -287,13 +325,16 @@ def place_generic_pins(pins: list[dict[str, Any]],
         else:
             y = y1 if side == "top" else y2
             orient = "TOP" if side == "top" else "BOTTOM"
-            span = (x2 - x1) - 32
             if n == 1:
-                xs = [(x1 + x2) // 2]
+                xs = [0]
             else:
-                step = span // (n - 1) if n > 1 else 0
-                xs = [x1 + 16 + i * step for i in range(n)]
-            xs = [(x + 8) // 16 * 16 for x in xs]
+                available = (x2 - x1) - 2 * BODY_MARGIN
+                step = max(MIN_STEP, available // (n - 1))
+                step = _round_up(step, GRID)
+                total = (n - 1) * step
+                x_start = -total // 2
+                xs = [x_start + i * step for i in range(n)]
+            xs = [_snap(x) for x in xs]
             for pin, x in zip(bucket, xs):
                 pin["_x"], pin["_y"] = x, y
                 pin["_orient"], pin["_offset"] = orient, 8
@@ -337,10 +378,10 @@ def emit_asy(model: dict[str, Any]) -> str:
             "_orient": None, "_offset": 8,
         })
 
-    # Pick body geometry
+    # Pick body geometry (pins already classified, so generic body can use _side)
     geom_factory = PART_GEOMS.get(part_type)
     if geom_factory is None:
-        geom = generic_rect_geom(len(pins))
+        geom = compute_generic_body(pins, name)
     else:
         geom = geom_factory()
 
@@ -353,7 +394,7 @@ def emit_asy(model: dict[str, Any]) -> str:
     # Place remaining pins around the body
     pins = place_generic_pins(pins, geom)
 
-    # Sort pins by declaration index for output order (visual convention)
+    # Sort pins by declaration index for output order (SpiceOrder = decl_index + 1)
     pins.sort(key=lambda p: p["_decl_index"])
 
     # ----- emit the .asy -----
@@ -361,25 +402,21 @@ def emit_asy(model: dict[str, Any]) -> str:
     out.append("Version 4")
     out.append("SymbolType CELL")
 
-    # body shape: for generic_rect, draw a RECTANGLE; for primitives we
-    # already have explicit LINEs in extra_lines.
+    # body shape
+    bx1, by1, bx2, by2 = geom.rect
     if part_type == "generic" or geom_factory is None:
-        x1, y1, x2, y2 = geom.rect
-        out.append(f"RECTANGLE Normal {x1} {y1} {x2} {y2}")
-        # name label inside the rectangle
+        out.append(f"RECTANGLE Normal {bx1} {by1} {bx2} {by2}")
         out.append(f'TEXT 0 0 Center 1 "{name}"')
-    for x1, y1, x2, y2 in geom.extra_lines:
-        out.append(f"LINE Normal {x1} {y1} {x2} {y2}")
+    for lx1, ly1, lx2, ly2 in geom.extra_lines:
+        out.append(f"LINE Normal {lx1} {ly1} {lx2} {ly2}")
 
     if part_type == "comparator":
         out.append('TEXT 8 0 Center 1 "C"')
 
-    # WINDOW overrides — place attribute text outside the body
-    bx1, by1, bx2, by2 = geom.rect
-    win0_dx, win0_dy = bx2 + 8, by1
-    win3_dx, win3_dy = bx2 + 8, by2
-    out.append(f"WINDOW 0 {win0_dx} {win0_dy} Left 2")
-    out.append(f"WINDOW 3 {win3_dx} {win3_dy} Left 2")
+    # Instance name above body center; value below body center.
+    # Size 1 (small) avoids overlap with pin labels at body edges.
+    out.append(f"WINDOW 0 0 {by1 - 16} Center 1")
+    out.append(f"WINDOW 3 0 {by2 + 16} Center 1")
 
     # SYMATTR block
     out.append(f"SYMATTR Prefix {prefix}")

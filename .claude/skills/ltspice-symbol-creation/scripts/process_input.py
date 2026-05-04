@@ -19,7 +19,6 @@ Other flags:
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import re
 import shutil
@@ -133,159 +132,15 @@ def cmd_scan(input_dir):
 
 
 def _emit_failed(output_dir, model_name, input_path, reason, parsed):
-    sub = output_dir / slug(model_name)
-    sub.mkdir(parents=True, exist_ok=True)
-    report = sub / f"{slug(model_name)}_symbol_report.md"
-    body = (
-        f"# Symbol generation report - {model_name}\n\n"
-        f"**Generated:** {dt.datetime.now().isoformat(timespec='seconds')}\n"
-        f"**Source file:** `{input_path}` (preserved unchanged)\n"
-        f"**Output folder:** `{sub}`\n"
-        f"**Status:** `FAILED`\n\n"
-        f"## Reason\n\n{reason}\n\n"
-        f"## Parser output\n\n```json\n"
-        f"{json.dumps(parsed, indent=2, default=str)[:4000]}\n```\n\n"
-        f"Status: FAILED\n"
-    )
-    report.write_text(body)
-    json.dump({"status": "FAILED", "reason": reason, "report": str(report)},
+    json.dump({"status": "FAILED", "model": model_name,
+               "input": str(input_path), "reason": reason},
               sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 1
 
 
-def _render_usage(name, lib_filename, pin_names):
-    lines = [
-        f"=== {name} - LTspice usage ===",
-        "",
-        "1. Copy these files into the same folder as your LTspice schematic,",
-        "   OR into your user library folder:",
-        f"     - {name}.asy",
-        f"     - {lib_filename}",
-        "",
-        "2. In LTspice, press F2, then 'Top Directory', and navigate to the",
-        f"   folder containing the .asy file. Find {name} in the symbol list.",
-        "",
-        "3. Add this directive to your schematic so the model is loaded:",
-        f"     .include {lib_filename}",
-        "   (or .lib if you prefer)",
-        "",
-        "4. Pin map (declaration order = SpiceOrder):",
-    ]
-    for i, n in enumerate(pin_names, start=1):
-        lines.append(f"     {i}. {n}")
-    lines += ["", "5. Wire pins, run.", ""]
-    return "\n".join(lines)
-
-
-def _render_report(*, model_name, kind, parsed, spec, val_json,
-                   norm_changes, pspice_warnings, missing_includes,
-                   status, input_path, out_subdir, confidence):
-    pins = spec.get("pins", [])
-    out = []
-    out.append(f"# Symbol generation report - {model_name}\n")
-    out.append(f"**Generated:** {dt.datetime.now().isoformat(timespec='seconds')}")
-    out.append(f"**Source file:** `{input_path}` (preserved unchanged)")
-    out.append(f"**Output folder:** `{out_subdir}`")
-    out.append(f"**Status:** `{status}`\n")
-
-    out.append("## 1. Input scan\n")
-    out.append(f"- Detected dialect: `{parsed.get('dialect','unknown')}`")
-    out.append(f"- Encryption flags: {parsed.get('encryption') or 'none'}")
-    out.append(f"- Encoding used: `{parsed.get('encoding','?')}`\n")
-
-    out.append("## 2. Detected model\n")
-    out.append(f"- Model name: `{model_name}`")
-    out.append(f"- Model type: `{kind}`")
-    if kind == "model":
-        m = next((m for m in parsed.get("models", [])
-                  if m["name"] == model_name), {})
-        out.append(f"- Primitive: `{m.get('type','?')}`")
-    out.append(f"- Inferred part type: `{spec.get('part_type','generic')}`")
-    out.append(f"- Confidence: {confidence}\n")
-
-    out.append("## 3. Pin map\n")
-    out.append("| # | Pin name |")
-    out.append("|---|---|")
-    for i, p in enumerate(pins, start=1):
-        out.append(f"| {i} | `{p['name']}` |")
-    out.append("")
-
-    out.append("## 4. Output files\n")
-    out.append(f"- `{model_name}.asy` - LTspice symbol")
-    out.append(f"- `{model_name}.lib` - Normalized model file")
-    out.append(f"- `{model_name}_test.asc` - Minimal test schematic")
-    out.append(f"- `{model_name}_usage_example.txt` - Plain-text usage notes")
-    out.append(f"- `{model_name}_symbol_report.md` - This file\n")
-
-    out.append("## 5. LTspice attributes used\n")
-    out.append("- `SymbolType`: CELL")
-    out.append(f"- `Prefix`: `{spec.get('prefix','?')}`")
-    if kind == "subckt":
-        out.append(f"- `SpiceModel`: `{model_name}`")
-    else:
-        out.append(f"- `Value`: `{model_name}`")
-    out.append(f"- `ModelFile`: `{spec.get('model_file','')}`\n")
-
-    out.append("## 6. Compatibility notes\n")
-    if norm_changes:
-        for c in norm_changes:
-            out.append(f"- Line {c['line']}: rule `{c['rule']}` applied.")
-    else:
-        out.append("- No rewrites applied; the original model was already LTspice-compatible.")
-    out.append("")
-
-    out.append("## 7. PSpice / dialect warnings\n")
-    if pspice_warnings:
-        for w in pspice_warnings[:50]:
-            out.append(f"- Line {w['line']}: `{w['match']}` - review `{w['text']}`.")
-    else:
-        out.append("- None.")
-    out.append("")
-
-    out.append("## 8. Dependencies\n")
-    incs = parsed.get("includes", [])
-    if incs:
-        for i in incs:
-            st = i.get("status", "unknown")
-            out.append(f"- `{i.get('directive','include')} {i.get('target','?')}` - {st}")
-    else:
-        out.append("- None.")
-    out.append("")
-
-    out.append("## 9. Validation checklist\n")
-    for c in val_json.get("checks", []):
-        mark = "x" if c["passed"] else " "
-        out.append(f"- [{mark}] {c['text']} - {c.get('evidence','')}")
-    summary = val_json.get("summary", {})
-    out.append(f"\n_Summary: {summary.get('passed',0)}/{summary.get('total',0)} checks passed._\n")
-
-    out.append("## 10. Usage instructions\n")
-    out.append(f"See `{model_name}_usage_example.txt` for the step-by-step.")
-    out.append(f"In short: copy the .asy and .lib next to your schematic, ")
-    out.append(f"add `.include {model_name}.lib` to the schematic, place the ")
-    out.append(f"symbol, wire by pin name.\n")
-
-    out.append("## 11. Manual actions required\n")
-    actions = []
-    if missing_includes:
-        for m in missing_includes:
-            actions.append(f"Locate and provide missing include: `{m['target']}`")
-    if pspice_warnings:
-        actions.append("Review PSpice warnings above; verify simulation matches expected behavior.")
-    if not actions:
-        actions.append("None.")
-    for a in actions:
-        out.append(f"- {a}")
-    out.append("")
-
-    out.append("## 12. Final status\n")
-    out.append(f"`{status}`\n")
-    out.append(f"Status: {status}\n")
-    return "\n".join(out)
-
-
-def cmd_generate(input_path, model_name, output_dir, part_type_override):
+def cmd_generate(input_path, model_name, output_dir, part_type_override,
+                 use_subfolder=False):
     parse = subprocess.run(
         [sys.executable, str(SCRIPT_DIR / "parse_spice.py"), str(input_path)],
         capture_output=True, text=True,
@@ -316,7 +171,10 @@ def cmd_generate(input_path, model_name, output_dir, part_type_override):
         return _emit_failed(output_dir, model_name, input_path,
                             f"model {model_name!r} not found in file", parsed)
 
-    out_subdir = output_dir / slug(matched["name"])
+    if use_subfolder:
+        out_subdir = output_dir / slug(matched["name"])
+    else:
+        out_subdir = output_dir
     out_subdir.mkdir(parents=True, exist_ok=True)
     lib_filename = f"{slug(matched['name'])}.lib"
     pins = [{"name": p} for p in matched.get("pins", [])] if kind == "subckt" else []
@@ -365,28 +223,9 @@ def cmd_generate(input_path, model_name, output_dir, part_type_override):
         except Exception:
             norm_summary = {"raw": norm.stdout}
 
-    test_path = out_subdir / f"{slug(matched['name'])}_test.asc"
-    subprocess.run(
-        [sys.executable, str(SCRIPT_DIR / "gen_test_asc.py"),
-         "--out", str(test_path)],
-        input=spec_json, capture_output=True, text=True,
-    )
-
-    usage_path = out_subdir / f"{slug(matched['name'])}_usage_example.txt"
-    pin_names = [p["name"] for p in pins]
-    usage_path.write_text(_render_usage(matched["name"], lib_filename, pin_names))
-
-    # Write placeholder report so validate's "report exists" check passes
-    report_path = out_subdir / f"{slug(matched['name'])}_symbol_report.md"
-    report_path.write_text(
-        f"# Symbol generation report - {matched['name']}\n\n"
-        f"_Placeholder - being filled in._\n\nStatus: PENDING\n"
-    )
-
     val_args = [sys.executable, str(SCRIPT_DIR / "validate.py"),
                 "--asy", str(asy_path), "--lib", str(lib_path),
-                "--model", matched["name"],
-                "--report", str(report_path), "--usage", str(usage_path)]
+                "--model", matched["name"]]
     if kind == "subckt":
         val_args += ["--declared-pins", ",".join(matched["pins"])]
 
@@ -429,24 +268,14 @@ def cmd_generate(input_path, model_name, output_dir, part_type_override):
     else:
         status = "READY"
 
-    report_path.write_text(_render_report(
-        model_name=matched["name"], kind=kind, parsed=parsed,
-        spec=spec, val_json=val_json, norm_changes=norm_changes,
-        pspice_warnings=pspice_warnings,
-        missing_includes=missing_includes, status=status,
-        input_path=input_path, out_subdir=out_subdir,
-        confidence=confidence,
-    ))
-
     summary = {
         "model": matched["name"], "kind": kind, "part_type": part_type,
         "confidence": confidence, "output_dir": str(out_subdir),
-        "files": {
-            "asy": str(asy_path), "lib": str(lib_path),
-            "test_asc": str(test_path), "report": str(report_path),
-            "usage": str(usage_path),
-        },
+        "files": {"asy": str(asy_path), "lib": str(lib_path)},
         "validation": val_json, "status": status,
+        "pspice_warnings": pspice_warnings,
+        "norm_changes": norm_changes,
+        "missing_includes": missing_includes,
     }
     json.dump(summary, sys.stdout, indent=2)
     sys.stdout.write("\n")
@@ -486,7 +315,8 @@ def cmd_all(input_dir, output_dir, part_type_override):
                 "candidates": candidates,
             })
             continue
-        rc = cmd_generate(fp, candidates[0], output_dir, part_type_override)
+        rc = cmd_generate(fp, candidates[0], output_dir, part_type_override,
+                          use_subfolder=True)
         n_done += (rc == 0)
         n_failed += (rc != 0)
         summary.append({"file": str(fp), "model": candidates[0], "exit_code": rc})

@@ -82,14 +82,21 @@ def emit_test_asc(model: dict[str, Any]) -> str:
     # Add the directive
     out.append(f"TEXT 64 {SYMBOL_Y + 232} Left 2 !{directive}")
 
-    # Add power supplies if power pins were detected
+    # Determine supply topology.
+    # Single-supply: negative pin is GND/VSS/COM/AGND/DGND/PGND (i.e. a ground name).
+    # Bipolar: negative pin is VEE/V-/VSS-with-negative-supply (op-amp style).
+    GROUND_NAMES = re.compile(
+        r"^(GND|VSS|COM|AGND|DGND|PGND|EGND|RTN|RETURN|0)$", re.IGNORECASE
+    )
+    is_single_supply = all(GROUND_NAMES.match(n) for n in neg_pins) if neg_pins else True
+
     if pos_pins:
-        # VCC source at +15 V
+        vcc_val = "3.3" if is_single_supply else "15"
         out.append(f"SYMBOL voltage 64 96 R0")
         out.append(f"SYMATTR InstName V_VCC")
-        out.append(f"SYMATTR Value 15")
+        out.append(f"SYMATTR Value {vcc_val}")
         out.append(f"FLAG 64 64 VCC")
-    if neg_pins:
+    if neg_pins and not is_single_supply:
         out.append(f"SYMBOL voltage 144 96 R0")
         out.append(f"SYMATTR InstName V_VEE")
         out.append(f"SYMATTR Value -15")

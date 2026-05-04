@@ -110,8 +110,7 @@ def parse_lib_models(path):
     return names
 
 
-def validate(asy_path, lib_path, model_name, report_path=None,
-             usage_path=None, declared_pins=None):
+def validate(asy_path, lib_path, model_name, declared_pins=None):
     checks = []
 
     def check(name, passed, evidence=""):
@@ -190,28 +189,6 @@ def validate(asy_path, lib_path, model_name, report_path=None,
           bool(is_bare),
           f"ModelFile={model_file!r}")
 
-    if report_path is not None:
-        if report_path.exists():
-            rtxt = report_path.read_text(encoding="utf-8", errors="replace")
-            has_status = re.search(
-                r"^Status:\s*(READY|READY_WITH_WARNINGS|NEEDS_MANUAL_REVIEW|FAILED|PENDING)\s*$",
-                rtxt, re.MULTILINE) is not None
-            check("Report exists and contains a Status line",
-                  has_status, f"report={report_path}")
-        else:
-            check("Report exists and contains a Status line",
-                  False, f"report missing: {report_path}")
-
-    if usage_path is not None:
-        if usage_path.exists():
-            utxt = usage_path.read_text(encoding="utf-8", errors="replace")
-            mentions_lib = ".lib" in utxt or ".include" in utxt or ".inc" in utxt
-            check("Usage example exists and mentions a .lib/.include directive",
-                  mentions_lib, f"usage={usage_path}")
-        else:
-            check("Usage example exists and mentions a .lib/.include directive",
-                  False, f"usage missing: {usage_path}")
-
     n_pass = sum(1 for c in checks if c["passed"])
     n_fail = len(checks) - n_pass
     return {
@@ -227,8 +204,6 @@ def main():
     ap.add_argument("--asy", required=True)
     ap.add_argument("--lib", required=True)
     ap.add_argument("--model", required=True)
-    ap.add_argument("--report")
-    ap.add_argument("--usage")
     ap.add_argument("--declared-pins")
     args = ap.parse_args()
 
@@ -238,8 +213,6 @@ def main():
 
     result = validate(
         Path(args.asy), Path(args.lib), args.model,
-        Path(args.report) if args.report else None,
-        Path(args.usage) if args.usage else None,
         decl_pins,
     )
     json.dump(result, sys.stdout, indent=2)
