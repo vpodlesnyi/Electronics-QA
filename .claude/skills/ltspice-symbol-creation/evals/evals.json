@@ -1,0 +1,26 @@
+{
+  "skill_name": "ltspice-symbol-creation",
+  "evals": [
+    {
+      "id": 0,
+      "name": "subckt-opamp-numeric-pins",
+      "prompt": "I dropped LMV321.lib in INPUT/SYMBOL/. It's a simple op-amp model with numeric pin labels (1..5). Please create the LTspice symbol package.",
+      "expected_output": "OUTPUT/SYMBOL/LMV321/ folder with LMV321.asy (5 pins, SpiceOrder 1..5 matching the .SUBCKT declaration order), LMV321.lib, LMV321_test.asc, LMV321_usage_example.txt, LMV321_symbol_report.md. Status: READY. Pin names in symbol must match .SUBCKT declaration: '1','2','3','4','5'. Op-amp triangle shape preferred but generic rectangle acceptable since pin names are numeric.",
+      "files": ["LMV321.lib"]
+    },
+    {
+      "id": 1,
+      "name": "model-primitive-zener",
+      "prompt": "Please make me an LTspice symbol for the BZX84-C5V1 zener diode model (in INPUT/SYMBOL/BZX84-C5V1.mod). Should use the diode primitive shape.",
+      "expected_output": "OUTPUT/SYMBOL/BZX84_C5V1/ with .asy using Prefix=D, Value=BZX84_C5V1, ModelFile=BZX84_C5V1.lib, 2 pins (A and K), part_type detected as zener. Report should mention LTspice's built-in 'diode' symbol as an alternative. Status: READY.",
+      "files": ["BZX84-C5V1.mod"]
+    },
+    {
+      "id": 2,
+      "name": "pspice-flavored-with-missing-include",
+      "prompt": "Build an LTspice symbol package for the TLV9001 op-amp. The vendor model is in INPUT/SYMBOL/TLV9001_PSPICE.lib but it's PSpice-flavored — has PARAMS:, VALUE={...}, and references TI_helpers.sub which I don't have. Convert what you can and tell me clearly what needs manual review.",
+      "expected_output": "OUTPUT/SYMBOL/TLV9001/ with .asy (5 pins in declaration order: OUT, VEE, INP, INN, VCC — SpiceOrder 1..5), normalized .lib with PARAMS: stripped and VALUE={} rewritten to V=. Report must flag: PSpice dialect detected, missing .INCLUDE TI_helpers.sub, the rewrites that were applied. Status: NEEDS_MANUAL_REVIEW (because of missing include).",
+      "files": ["TLV9001_PSPICE.lib"]
+    }
+  ]
+}

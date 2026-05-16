@@ -12,6 +12,23 @@ INPUT/SCH/*
 OUTPUT/SCH/*
 !OUTPUT/SCH/.gitkeep
 
+# Keep folder structure but ignore all files inside INPUT/ALTERNATIVE and OUTPUT/ALTERNATIVE
+INPUT/ALTERNATIVE/*
+!INPUT/ALTERNATIVE/.gitkeep
+
+OUTPUT/ALTERNATIVE/*
+!OUTPUT/ALTERNATIVE/.gitkeep
+
+# Keep folder structure but ignore all files inside INPUT/SYMBOL and OUTPUT/SYMBOL
+INPUT/SYMBOL/*
+!INPUT/SYMBOL/.gitkeep
+
+OUTPUT/SYMBOL/*
+!OUTPUT/SYMBOL/.gitkeep
+
+# Eval / iteration workspaces created by the skill-creator
+.claude/skills/*-workspace/
+
 # Dependencies
 node_modules/
 
@@ -20,6 +37,6 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Ignore OS files
+# OS files
 .DS_Store
 Thumbs.db
