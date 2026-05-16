@@ -16,6 +16,7 @@ The goal is not to replace engineering judgment, but to help engineers identify 
 |---|---|
 | BOM QA | ✅ Available |
 | LTspice Simulation | ✅ Available |
+| LTspice Symbol Creation | ✅ Available |
 | CLI (`eqa`) | 🔧 In development |
 | Schematic review | 📋 Planned |
 
@@ -272,6 +273,83 @@ Some circuit topologies (high-side switches, open-collector outputs) leave a nod
 
 ---
 
+## Module: LTspice Symbol Creation
+
+Converts a downloaded vendor SPICE model into a ready-to-use LTspice symbol package — a correctly-ordered `.asy` symbol file and a normalized `.lib` model file — without any manual editing.
+
+### How it works
+
+When you trigger the skill, Claude runs a structured five-step process:
+
+1. **Scan and classify** — Inventories `INPUT/SYMBOL/` and detects every SPICE model file present, identifying the dialect (LTspice, PSpice, HSpice), model names, pin lists, and any compatibility issues. If multiple candidates are found, Claude lists them and asks which to generate.
+2. **Readback and confirmation** — Before generating any files, Claude presents the detected model name, model type (`.SUBCKT` or `.MODEL`), the exact pin order from the declaration, the inferred part type (op-amp, MOSFET, diode, etc.), and every compatibility flag. For ambiguous cases it asks for confirmation before proceeding.
+3. **Model normalization** — Copies the model into the output folder as `<MODEL_NAME>.lib`, applying safe LTspice-compatibility rewrites (e.g., stripping the PSpice `PARAMS:` keyword, converting `VALUE={}` to B-source syntax). The original input file is never modified.
+4. **Symbol generation** — Writes the `.asy` symbol using the detected pin list. Pin order follows the `.SUBCKT` declaration exactly — `SpiceOrder` is never re-sorted alphabetically or for aesthetics, since a wrong pin order produces a symbol that places onto a schematic but simulates as a different circuit.
+5. **Validation** — Checks that every pin in the `.SUBCKT` declaration has a matching `PIN` entry with a correct `SpiceOrder`, that the `Prefix` is right for the model type (`X` for subcircuits, `D`/`Q`/`M`/`J` for primitives), and that no absolute filesystem paths are embedded in the symbol. Any failure is reported in chat with the exact issue.
+
+### What model types it supports
+
+- `.SUBCKT`-based models (op-amps, regulators, drivers, optocouplers, ICs of any kind)
+- `.MODEL`-based primitives (diodes, BJTs, MOSFETs, JFETs)
+- PSpice and HSpice dialect detection with safe automatic rewrites where possible
+- `.zip` vendor packages — extracted to a temporary directory, contents inspected automatically
+- `.INCLUDE` / `.LIB` chains — followed and resolved; missing dependencies are flagged in chat
+
+### What it cannot do
+
+- Decode encrypted models (`*#FUNC`, `ENCRYPTED`, `*#ENC` — no `.asy` is written; vendor support is required)
+- Search the internet for a model given only an MPN — download the model file first and place it in `INPUT/SYMBOL/`
+- Simulate the circuit (use the LTspice Simulation module for that)
+
+### Output status labels
+
+| Status | Meaning |
+|---|---|
+| `READY` | Validation passes, no PSpice syntax, safe to simulate as-is. |
+| `READY_WITH_WARNINGS` | Validation passes but minor issues were detected (e.g., one suspect construct LTspice likely handles, a rewritten PSpice expression). |
+| `NEEDS_MANUAL_REVIEW` | Symbol generated but the model contains PSpice-only constructs, references a missing dependency, or has another issue that can't be vouched for. |
+| `FAILED` | No valid `.SUBCKT` or `.MODEL` found, or the model is encrypted. No `.asy` is written. |
+
+### How to run
+
+**Step 1 — Place your SPICE model file in the input folder:**
+```
+INPUT/SYMBOL/YourModel.lib
+```
+Supported formats: `.lib`, `.sub`, `.cir`, `.ckt`, `.mod`, `.mdl`, `.sp`, `.spi`, `.spice`, `.net`, `.inc`, `.txt`, `.asy`, or a `.zip` vendor package.
+
+**Step 2 — Start Claude Code (if not already running):**
+```bash
+claude
+```
+
+**Step 3 — Trigger the skill** by typing any of these:
+```
+create an LTspice symbol
+```
+```
+make an .asy for this model
+```
+```
+wrap this SPICE model
+```
+```
+I downloaded a model and need a symbol
+```
+
+**Step 4 — Confirm the readback.** Claude will show you the detected model name, pin table (in declaration order), inferred part type, and any PSpice compatibility flags. Check that the pin order matches your datasheet before confirming — this is what prevents a silently-wrong simulation.
+
+**Step 5 — Get your symbol package.** When generation is complete, two files are written:
+
+```
+OUTPUT/SYMBOL/YourModel.asy    ← LTspice symbol, ready to place
+OUTPUT/SYMBOL/YourModel.lib    ← Normalized model file
+```
+
+Copy both files into a folder next to your schematic (or into the LTspice `lib/` directory). Add `.include YourModel.lib` as a SPICE directive, then press **F2** in LTspice to place the symbol.
+
+---
+
 ## Folder structure
 
 ```
@@ -280,15 +358,21 @@ Some circuit topologies (high-side switches, open-collector outputs) leave a nod
 │   └── skills/
 │       ├── bom-qa/
 │       │   └── SKILL.md            ← BOM QA skill definition
-│       └── ltspice-simulation/
-│           ├── SKILL.md            ← LTspice simulation skill definition
-│           └── references/         ← SPICE syntax, ASC rules, circuit templates
+│       ├── ltspice-simulation/
+│       │   ├── SKILL.md            ← LTspice simulation skill definition
+│       │   └── references/         ← SPICE syntax, ASC rules, circuit templates
+│       └── ltspice-symbol-creation/
+│           ├── SKILL.md            ← LTspice symbol creation skill definition
+│           ├── scripts/            ← Python pipeline (parse, normalize, gen_asy, validate)
+│           └── references/         ← .asy format spec, pin layout heuristics, PSpice compat
 ├── INPUT/
 │   ├── BOM/                        ← place your BOM files here before running
-│   └── SCH/                        ← place your schematic images here before simulating
+│   ├── SCH/                        ← place your schematic images here before simulating
+│   └── SYMBOL/                     ← place your SPICE model files here before symbol creation
 ├── OUTPUT/
 │   ├── BOM/                        ← BOM reports saved here automatically (git-ignored)
-│   └── SCH/                        ← generated .asc schematics saved here (git-ignored)
+│   ├── SCH/                        ← generated .asc schematics saved here (git-ignored)
+│   └── SYMBOL/                     ← generated .asy symbol packages saved here (git-ignored)
 ├── scripts/
 │   └── gen_asc_<circuit>.py        ← reproducible script for each generated schematic
 ├── .mcp.json                       ← MCP plugin configuration (loaded automatically by Claude Code)
